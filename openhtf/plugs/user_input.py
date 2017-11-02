@@ -23,6 +23,7 @@ prompt state should use the openhtf.prompts pseudomodule.
 
 import collections
 import functools
+import locale
 import logging
 import os
 import platform
@@ -92,7 +93,10 @@ class ConsolePrompt(threading.Thread):
         if sys.stdin.isatty():
           termios.tcflush(sys.stdin, termios.TCIFLUSH)
 
-        line = ''
+        # Although this isn't threadsafe with do_setlocale=True, it doesn't work without it.
+        encoding = locale.getpreferredencoding(do_setlocale=True)
+
+        line = u''
         while not self._stopped:
           inputs, _, _ = select.select([sys.stdin], [], [], 0.001)
           for stream in inputs:
@@ -111,7 +115,7 @@ class ConsolePrompt(threading.Thread):
                   # want to actually quit.
                   print "Hit ^C (Ctrl+c) to exit."
                   break
-              line += new
+              line += new.decode(encoding)
               if '\n' in line:
                 response = line[:line.find('\n')]
                 self._answered = True
@@ -143,7 +147,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
   def _create_prompt(self, message, text_input):
     """Sets the prompt."""
     prompt_id = uuid.uuid4()
-    _LOG.debug('Displaying prompt (%s): "%s"%s', prompt_id, message,
+    _LOG.debug(u'Displaying prompt (%s): "%s"%s', prompt_id, message,
                ', Expects text' if text_input else '')
 
     self._response = None
@@ -214,7 +218,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
     """
     if isinstance(prompt_id, basestring):
       prompt_id = uuid.UUID(prompt_id)
-    _LOG.debug('Responding to prompt (%s): "%s"', prompt_id.hex, response)
+    _LOG.debug(u'Responding to prompt (%s): "%s"', prompt_id.hex, response)
     with self._cond:
       if not (self._prompt and self._prompt.id == prompt_id):
         return False
