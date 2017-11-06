@@ -225,12 +225,12 @@ class PhaseExecutor(object):
     """Executes the given phase, returning a PhaseExecutionOutcome."""
     # Check this before we create a PhaseState and PhaseRecord.
     if phase_desc.options.run_if and not phase_desc.options.run_if():
-      _LOG.info('Phase "%s" skipped due to run_if returning falsey.',
+      _LOG.info('Phase "%s" skipped due to run_if returning false.',
                 phase_desc.name)
       return PhaseExecutionOutcome(openhtf.PhaseResult.SKIP)
 
     with self.test_state.running_phase_context(phase_desc) as phase_state:
-      _LOG.info('>>> Now executing phase: "%s" <<<', phase_desc.name)
+      _LOG.debug('>>> Now executing phase: "%s" <<<', phase_desc.name)
       phase_thread = PhaseExecutorThread(phase_desc, self.test_state)
       phase_thread.start()
       self._current_phase_thread = phase_thread
