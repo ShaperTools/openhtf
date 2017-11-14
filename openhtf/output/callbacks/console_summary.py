@@ -31,7 +31,6 @@ class ConsoleSummary():
         test_record.Outcome.FAIL:self.RED,
         test_record.Outcome.ERROR:self.ORANGE,
         test_record.Outcome.TIMEOUT:self.ORANGE,
-        test_record.Outcome.ABORTED:self.RED,
     }
     self.output_stream = output_stream
   # pylint: enable=invalid-name
@@ -45,19 +44,26 @@ class ConsoleSummary():
         new_phase = True
         phase_time_sec = (float(phase.end_time_millis)
                           - float(phase.start_time_millis)) / 1000.0
-        for name, measurement in phase.measurements.iteritems():
-          if measurement.outcome == meas_module.Outcome.FAIL:
+        measured = phase.measured_values
+        measurements = phase.measurements
+        for key in measurements:
+          result = measurements[key]
+          if result.outcome == meas_module.Outcome.FAIL:
             if new_phase:
               output_lines.append('failed phase: %s [ran for %.2f sec]' %
                                   (phase.name, phase_time_sec))
               new_phase = False
 
             output_lines.append('%sfailed_item: %s' %
-                                (self.indent, name))
+                                (self.indent, result.name))
+            measured_val_str = str(measured[result.name])
+            # Sometimes, this is a big array that scrolls useful stuff of the screen. If it's too big, we cut it down
+            if len(measured_val_str) > 80:
+                measured_val_str = measured_val_str[:70] + " [Data Truncated]."
             output_lines.append('%smeasured_value: %s' %
-                                (self.indent*2, measurement.measured_value))
+                                (self.indent*2, measured_val_str))
             output_lines.append('%svalidators:' % (self.indent*2))
-            for validator in measurement.validators:
+            for validator in result.validators:
               output_lines.append('%svalidator: %s' %
                                   (self.indent*3, str(validator)))
 
@@ -72,3 +78,5 @@ class ConsoleSummary():
     output_lines.append('\n')
     text = '\n'.join(output_lines)
     self.output_stream.write(text)
+
+
