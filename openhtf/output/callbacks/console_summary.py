@@ -56,9 +56,9 @@ class ConsoleSummary():
                                 (self.indent, name))
 
             # Sometimes, this is a big array that scrolls useful stuff of the screen. If it's too big, we cut it down
-            measured_val_str = measurement.measured_value
-            if len(measured_val_str) > 80:
-                measured_val_str = measured_val_str[:70] + " [Data Truncated]"
+            measured_val_str = str(measurement.measured_value)
+            if len(measured_val_str) > 120:
+                measured_val_str = measured_val_str[:103] + self.ORANGE + " [Data Truncated]" + self.RESET
             output_lines.append('%smeasured_value: %s' %
                                 (self.indent*2, measured_val_str))
             
