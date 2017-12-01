@@ -379,7 +379,10 @@ class PhaseState(mutablerecords.Record(
     Raises:
       DuplicateAttachmentError: Raised if there is already an attachment with
         the given name.
+      ValueError: Raised if the name contains a period
     """
+    if '.' in name:
+      raise ValueError('Attachment names cannot contain periods.')
     if name in self.phase_record.attachments:
       raise DuplicateAttachmentError('Duplicate attachment for %s' % name)
     if mimetype and not mimetypes.guess_extension(mimetype):
