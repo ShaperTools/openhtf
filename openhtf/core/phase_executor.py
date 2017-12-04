@@ -222,7 +222,7 @@ class PhaseExecutor(object):
     # We've been cancelled, so just 'timeout' the phase.
     return PhaseExecutionOutcome(None)
 
-  def __print_timeout_string(self, phase_desc):
+  def _log_timeout_string(self, phase_desc):
     t = phase_desc.options.timeout_s
     if t is None:
       # I don't think this should ever happen
@@ -244,7 +244,7 @@ class PhaseExecutor(object):
 
     with self.test_state.running_phase_context(phase_desc) as phase_state:
       _LOG.debug('>>> Now executing phase: "%s" <<<', phase_desc.name)
-      self.__print_timeout_string(phase_desc)
+      self._log_timeout_string(phase_desc)
       phase_thread = PhaseExecutorThread(phase_desc, self.test_state)
       phase_thread.start()
       self._current_phase_thread = phase_thread
