@@ -38,6 +38,7 @@ import sys
 import threading
 import time
 import traceback
+import math
 
 import openhtf
 from openhtf.util import argv
@@ -221,6 +222,18 @@ class PhaseExecutor(object):
     # We've been cancelled, so just 'timeout' the phase.
     return PhaseExecutionOutcome(None)
 
+  def _log_timeout_string(self, phase_desc):
+    t = phase_desc.options.timeout_s
+    if t is None:
+      # I don't think this should ever happen
+      _LOG.info('No timeout on this phase.')
+    elif float(t)/60.0 > 20:
+      _LOG.info('You have a long time to complete this phase.')
+    else:
+      m = int(math.floor(float(t) / 60.0))
+      s = int(t - m * 60)
+      _LOG.info('You have %d minutes and %d seconds to complete this phase.' % (m, s))
+
   def _execute_phase_once(self, phase_desc, is_last_repeat):
     """Executes the given phase, returning a PhaseExecutionOutcome."""
     # Check this before we create a PhaseState and PhaseRecord.
@@ -231,6 +244,7 @@ class PhaseExecutor(object):
 
     with self.test_state.running_phase_context(phase_desc) as phase_state:
       _LOG.debug('>>> Now executing phase: "%s" <<<', phase_desc.name)
+      self._log_timeout_string(phase_desc)
       phase_thread = PhaseExecutorThread(phase_desc, self.test_state)
       phase_thread.start()
       self._current_phase_thread = phase_thread
