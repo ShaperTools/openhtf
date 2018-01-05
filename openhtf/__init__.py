@@ -268,14 +268,19 @@ class Test(object):
                    final_state.test_record.metadata['test_name'])
         for output_cb in self._test_options.output_callbacks:
           try:
+            _LOG.debug('Executing callback "%s"' % output_cb)
             output_cb(final_state.test_record)
           except Exception:  # pylint: disable=broad-except
             _LOG.exception(
                 'Output callback %s raised; continuing anyway', output_cb)
+          _LOG.debug('Callback "%s" complete' % output_cb)
+
       finally:
+        _LOG.debug('Deleting self.TEST_INSTANCES[self.uid]')
         del self.TEST_INSTANCES[self.uid]
         self._executor = None
 
+    _LOG.debug('Test.execute() complete.')
     return final_state.test_record.outcome == test_record.Outcome.PASS
 
 
