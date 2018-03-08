@@ -43,8 +43,7 @@ class ConsoleSummary():
     if record.outcome != test_record.Outcome.PASS:
       for phase in record.phases:
         new_phase = True
-        phase_time_sec = (float(phase.end_time_millis)
-                          - float(phase.start_time_millis)) / 1000.0
+        phase_time_sec = (float(phase.end_time_millis) - float(phase.start_time_millis)) / 1000.0
         for name, measurement in phase.measurements.iteritems():
           if measurement.outcome == meas_module.Outcome.FAIL:
             if new_phase:
@@ -69,11 +68,12 @@ class ConsoleSummary():
 
         phase_result = phase.result.phase_result
         if not phase_result:   #Timeout
-          output_lines.append('timeout phase: %s [ran for %.2f sec]' %
-                              (phase.name, phase_time_sec))
+          output_lines.append('timeout phase: %s [ran for %.2f sec]' % (phase.name, phase_time_sec))
         elif 'CONTINUE' not in str(phase_result):  #Exception
-          output_lines.append('%sexception type: %s' %
-                              (self.indent, record.outcome_details[0].code))
+          if len(record.loutcome_details) == 0:
+            output_lines.append('%soutcome_details is empty' % self.indent)
+          else:
+            output_lines.append('%sexception type: %s' % (self.indent, record.outcome_details[0].code))
 
     output_lines.append('\n')
     text = '\n'.join(output_lines)
