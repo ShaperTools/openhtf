@@ -70,7 +70,7 @@ class ConsoleSummary():
         if not phase_result:   #Timeout
           output_lines.append('timeout phase: %s [ran for %.2f sec]' % (phase.name, phase_time_sec))
         elif 'CONTINUE' not in str(phase_result):  #Exception
-          if len(record.loutcome_details) == 0:
+          if len(record.outcome_details) == 0:
             output_lines.append('%soutcome_details is empty' % self.indent)
           else:
             output_lines.append('%sexception type: %s' % (self.indent, record.outcome_details[0].code))
