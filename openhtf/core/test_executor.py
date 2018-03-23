@@ -108,6 +108,7 @@ class TestExecutor(threads.KillableThread):
 
   def wait(self):
     """Waits until death."""
+    self.test_state.logger.debug("Entered TestExecutor.wait()")
     try:
       self.join(sys.float_info.max)  # Timeout needed for SIGINT handling.
     except KeyboardInterrupt:
