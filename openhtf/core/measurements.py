@@ -315,6 +315,9 @@ class DimensionedMeasuredValue(mutablerecords.Record(
   def __str__(self):
     return str(self.value) if self.is_value_set else 'UNSET'
 
+  def __len__(self):
+    return len(self.value_dict) if self.is_value_set else None
+
   def with_notify(self, notify_value_set):
     self.notify_value_set = notify_value_set
     return self
