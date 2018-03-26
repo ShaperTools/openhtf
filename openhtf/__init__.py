@@ -31,6 +31,7 @@ import threading
 import uuid
 import weakref
 from types import LambdaType
+import time
 
 import mutablerecords
 
@@ -256,8 +257,10 @@ class Test(object):
           self._test_options.teardown_function)
       _LOG.info('Executing test: %s', self.descriptor.code_info.name)
       self.TEST_INSTANCES[self.uid] = self
+      _LOG.info('About to start _executor thread...')
       self._executor.start()
-
+      _LOG.info('_executor thread started. Will sleep for 1 second.')
+      time.sleep(1)
     try:
       self._executor.wait()
     finally:
