@@ -402,10 +402,10 @@ class TestState(util.SubscribableStateMixin):
         'Test already completed with status %s!' % self._status.name)
     # Sanity check to make sure we have a DUT ID by the end of the test.
     if not self.test_record.dut_id:
-      print ''
+      print ('')
       self.logger.warning("WARNING: no DUT ID assigned at test finalization. "
                           "This record will be assigned DUT_ID = \"UNKNOWN\"")
-      print ''
+      print ('')
       self.test_record.dut_id = "UNKNOWN"
 
     self.test_record.outcome = test_outcome

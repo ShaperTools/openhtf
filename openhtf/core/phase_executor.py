@@ -254,7 +254,7 @@ class PhaseExecutor(object):
 
     override_result = None
     with self.test_state.running_phase_context(phase_desc) as phase_state:
-      print ''
+      print ('')
       _LOG.debug('>>> Now executing phase: "%s" <<<', phase_desc.name)
       self._log_timeout_string(phase_desc)
       with self._current_phase_thread_lock:
