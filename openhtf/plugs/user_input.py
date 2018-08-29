@@ -43,7 +43,7 @@ if platform.system() != 'Windows':
 
 _LOG = logging.getLogger(__name__)
 
-PROMPT = '--> '
+PROMPT = ''#''--> '
 
 
 class PromptInputError(Exception):
