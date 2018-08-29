@@ -220,7 +220,8 @@ class TestExecutor(threads.KillableThread):
     if isinstance(phase, phase_group.PhaseGroup):
       return self._execute_phase_group(phase)
 
-    self.test_state.logger.debug('Handling phase %s', phase.name)
+    # self.test_state.logger.debug('Handling phase %s', phase.name)
+    # We have our own phase start marker; disable this one.
     outcome = self._phase_exec.execute_phase(phase)
     if outcome.is_terminal and not self._last_outcome:
       self._last_outcome = outcome
