@@ -272,8 +272,6 @@ class UserInput(plugs.FrontendAwareBasePlug):
     Returns:
       True if the prompt with the given ID was active, otherwise False.
     """
-    if isinstance(prompt_id, basestring):
-      prompt_id = uuid.UUID(prompt_id)
     _LOG.debug(u'Responding to prompt (%s): "%s"', prompt_id.hex, response)
     with self._cond:
       if not (self._prompt and self._prompt.id == prompt_id):
