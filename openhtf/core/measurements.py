@@ -68,10 +68,16 @@ from enum import Enum
 
 import mutablerecords
 
-import openhtf
 from openhtf import util
+from openhtf.core import phase_descriptor
 from openhtf.util import validators
 from openhtf.util import units
+import six
+
+try:
+  import pandas
+except ImportError:
+  pandas = None
 
 _LOG = logging.getLogger(__name__)
 
@@ -185,6 +191,19 @@ class Measurement(  # pylint: disable=no-init
                                                                 unit_desc))
     return unit_desc
 
+  def _maybe_make_dimension(self, dimension):
+    """Return a `measurements.Dimension` instance."""
+    # For backwards compatibility the argument can be either a Dimension, a
+    # string or a `units.UnitDescriptor`.
+    if isinstance(dimension, Dimension):
+      return dimension
+    if isinstance(dimension, units.UnitDescriptor):
+      return Dimension.from_unit_descriptor(dimension)
+    if isinstance(dimension, str):
+      return Dimension.from_string(dimension)
+
+    raise TypeError('Cannot convert %s to a dimension', dimension)
+
   def with_units(self, unit_desc):
     """Declare the units for this Measurement, returns self for chaining."""
     self.units = self._maybe_make_unit_desc(unit_desc)
@@ -193,7 +212,7 @@ class Measurement(  # pylint: disable=no-init
   def with_dimensions(self, *dimensions):
     """Declare dimensions for this Measurement, returns self for chaining."""
     self.dimensions = tuple(
-        self._maybe_make_unit_desc(dim) for dim in dimensions)
+        self._maybe_make_dimension(dim) for dim in dimensions)
     return self
 
   def with_validator(self, validator):
@@ -232,11 +251,17 @@ class Measurement(  # pylint: disable=no-init
   def validate(self):
     """Validate this measurement and update its 'outcome' field."""
     # PASS if all our validators return True, otherwise FAIL.
-    if all(v(self.measured_value.value) for v in self.validators):
-      self.outcome = Outcome.PASS
-    else:
+    try:
+      if all(v(self.measured_value.value) for v in self.validators):
+        self.outcome = Outcome.PASS
+      else:
+        self.outcome = Outcome.FAIL
+      return self
+    except Exception as e:  # pylint: disable=bare-except
+      _LOG.error('Validation for measurement %s raised an exception %s.',
+                 self.name, e)
       self.outcome = Outcome.FAIL
-    return self
+      raise
 
   def _asdict(self):
     """Convert this measurement to a dict of basic types."""
@@ -253,6 +278,21 @@ class Measurement(  # pylint: disable=no-init
       if getattr(self, attr) is not None:
         retval[attr] = getattr(self, attr)
     return retval
+
+  def to_dataframe(self, columns=None):
+    """Convert a multi-dim to a pandas dataframe."""
+    if not isinstance(self.measured_value, DimensionedMeasuredValue):
+      raise TypeError(
+        'Only a dimensioned measurement can be converted to a DataFrame')
+
+
+    if columns is None:
+      columns = [d.name for d in self.dimensions]
+      columns += [self.units.name if self.units else 'value']
+
+    dataframe = self.measured_value.to_dataframe(columns)
+
+    return dataframe
 
 
 class MeasuredValue(
@@ -304,6 +344,64 @@ class MeasuredValue(
     self.is_value_set = True
 
 
+class Dimension(object):
+  """Dimension for multi-dim Measurements.
+
+  Dimensions optionally include a unit and a description.  This is intended
+  as a drop-in replacement for UnitDescriptor for backwards compatibility.
+  """
+
+  def __init__(self, description='', unit=units.NO_DIMENSION):
+    self.description = description
+    self.unit = unit
+
+  def __eq__(self, other):
+    return (self.description == other.description and self.unit == other.unit)
+
+  def __ne__(self, other):
+    return not self == other
+
+  def __repr__(self):
+    return '<%s: %s>' % (type(self).__name__, self._asdict())
+
+  @classmethod
+  def from_unit_descriptor(cls, unit_desc):
+    return cls(unit=unit_desc)
+
+  @classmethod
+  def from_string(cls, string):
+    """Convert a string into a Dimension"""
+    # Note: There is some ambiguity as to whether the string passed is intended
+    # to become a unit looked up by name or suffix, or a Dimension descriptor.
+    if string in units.UNITS_BY_ALL:
+      return cls(description=string, unit=units.Unit(string))
+    else:
+      return cls(description=string)
+
+  @property
+  def code(self):
+    """Provides backwards compatibility to `units.UnitDescriptor` api."""
+    return self.unit.code
+
+  @property
+  def suffix(self):
+    """Provides backwards compatibility to `units.UnitDescriptor` api."""
+    return self.unit.suffix
+
+  @property
+  def name(self):
+    """Provides backwards compatibility to `units.UnitDescriptor` api."""
+    return self.description or self.unit.name
+
+  def _asdict(self):
+    return {
+        'code': self.code,
+        'description': self.description,
+        'name': self.name,
+        'suffix': self.suffix,
+    }
+
+
 class DimensionedMeasuredValue(mutablerecords.Record(
     'DimensionedMeasuredValue', ['name', 'num_dimensions'],
     {'notify_value_set': None, 'value_dict': collections.OrderedDict})):
@@ -328,7 +426,7 @@ class DimensionedMeasuredValue(mutablerecords.Record(
 
   def __iter__(self):  # pylint: disable=invalid-name
     """Iterate over items, allows easy conversion to a dict."""
-    return self.value_dict.iteritems()
+    return iter(six.iteritems(self.value_dict))
 
   def __setitem__(self, coordinates, value):  # pylint: disable=invalid-name
     coordinates_len = len(coordinates) if hasattr(coordinates, '__len__') else 1
@@ -363,13 +461,22 @@ class DimensionedMeasuredValue(mutablerecords.Record(
 
     Returns:
       A list of tuples; the last element of each tuple will be the measured
-      value, the other elements will be the assocated coordinates.  The tuples
+      value, the other elements will be the associated coordinates.  The tuples
       are output in the order in which they were set.
     """
     if not self.is_value_set:
       raise MeasurementNotSetError('Measurement not yet set', self.name)
     return [dimensions + (value,) for dimensions, value in
-            self.value_dict.iteritems()]
+            six.iteritems(self.value_dict)]
+
+  def to_dataframe(self, columns=None):
+    """Converts to a `pandas.DataFrame`"""
+    if not self.is_value_set:
+      raise ValueError('Value must be set before converting to a DataFrame.')
+    if not pandas:
+      raise RuntimeError('Install pandas to convert to pandas.DataFrame')
+    return pandas.DataFrame.from_records(self.value, columns=columns)
+
 
 
 class Collection(mutablerecords.Record('Collection', ['_measurements'])):
@@ -424,7 +531,7 @@ class Collection(mutablerecords.Record('Collection', ['_measurements'])):
   def __iter__(self):  # pylint: disable=invalid-name
     """Extract each MeasurementValue's value."""
     return ((key, meas.measured_value.value)
-            for key, meas in self._measurements.iteritems())
+            for key, meas in six.iteritems(self._measurements))
 
   def __setattr__(self, name, value):  # pylint: disable=invalid-name
     self[name] = value
@@ -472,7 +579,7 @@ def measures(*measurements, **kwargs):
     """Turn strings into Measurement objects if necessary."""
     if isinstance(meas, Measurement):
       return meas
-    elif isinstance(meas, basestring):
+    elif isinstance(meas, six.string_types):
       return Measurement(meas, **kwargs)
     raise InvalidMeasurementType('Expected Measurement or string', meas)
 
@@ -491,7 +598,7 @@ def measures(*measurements, **kwargs):
   # 'measurements' is guaranteed to be a list of Measurement objects here.
   def decorate(wrapped_phase):
     """Phase decorator to be returned."""
-    phase = openhtf.PhaseDescriptor.wrap_or_copy(wrapped_phase)
+    phase = phase_descriptor.PhaseDescriptor.wrap_or_copy(wrapped_phase)
     duplicate_names = (set(m.name for m in measurements) &
                        set(m.name for m in phase.measurements))
     if duplicate_names:

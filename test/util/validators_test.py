@@ -2,17 +2,19 @@
 
 import copy
 import decimal
+import six
 import unittest
 
+from builtins import int
 from openhtf.util import validators
 
 
 class TestInRange(unittest.TestCase):
 
   def test_raises_if_invalid_arguments(self):
-    with self.assertRaisesRegexp(ValueError, 'Must specify minimum'):
+    with six.assertRaisesRegex(self, ValueError, 'Must specify minimum'):
       validators.InRange()
-    with self.assertRaisesRegexp(ValueError, 'Minimum cannot be greater'):
+    with six.assertRaisesRegex(self, ValueError, 'Minimum cannot be greater'):
       validators.InRange(minimum=10, maximum=0)
 
   def test_invalidates_non_numbers(self):
@@ -54,6 +56,14 @@ class TestInRange(unittest.TestCase):
     validator_c = validators.InRange(maximum=10)
     self.assertNotEqual(validator_a, validator_c)
 
+  def test_with_custom_type(self):
+    hex_int = lambda x: int(x, 16)
+    test_validator = validators.InRange('0x10', '0x12', type=hex_int)
+    self.assertTrue(test_validator(0x11))
+    self.assertFalse(test_validator(0x9))
+    self.assertEqual(test_validator.minimum, 0x10)
+    self.assertEqual(test_validator.maximum, 0x12)
+
 
 class TestEqualsValidator(unittest.TestCase):
 
@@ -66,6 +76,11 @@ class TestEqualsValidator(unittest.TestCase):
       A = 10
     my_type = MyType()
     self.assertTrue(validators.Equals(my_type)(my_type))
+
+  def test_with_custom_type(self):
+    hex_int = lambda x: int(x, 16)
+    self.assertTrue(validators.Equals('0x12', type=hex_int)(0x12))
+    self.assertEqual(validators.Equals('0x12', type=hex_int).expected, 0x12)
 
   def test_str_does_not_raise(self):
     equality_validator = validators.Equals(1)
@@ -84,7 +99,7 @@ class TestEqualsValidator(unittest.TestCase):
 class TestEqualsFactory(unittest.TestCase):
 
   def test_with_numbers(self):
-    for expected in [1, 1.0, decimal.Decimal(1), 1L]:
+    for expected in [1, 1.0, decimal.Decimal(1), int(1)]:
       number_validator = validators.equals(expected)
       self.assertTrue(number_validator(expected))
       self.assertFalse(number_validator(0))
@@ -108,7 +123,7 @@ class TestEqualsFactory(unittest.TestCase):
 class TestWithinPercent(unittest.TestCase):
 
   def test_raises_for_negative_percentage(self):
-    with self.assertRaisesRegexp(ValueError, 'percent argument is'):
+    with six.assertRaisesRegex(self, ValueError, 'percent argument is'):
       validators.WithinPercent(expected=100, percent=-1)
 
   def test_within_percent_less_than_one_hundred(self):

@@ -58,6 +58,7 @@ _LOG = logging.getLogger(__name__)
 
 class ExceptionInfo(collections.namedtuple(
     'ExceptionInfo', ['exc_type', 'exc_val', 'exc_tb'])):
+  """Wrap the description of a raised exception and its traceback."""
 
   def _asdict(self):
     return {
@@ -65,6 +66,9 @@ class ExceptionInfo(collections.namedtuple(
         'exc_val': self.exc_val,
         'exc_tb': ''.join(traceback.format_exception(*self)),
     }
+
+  def __str__(self):
+    return self.exc_type.__name__
 
 
 class InvalidPhaseResultError(Exception):
@@ -92,12 +96,13 @@ class PhaseExecutionOutcome(collections.namedtuple(
   other value will raise an InvalidPhaseResultError.
   """
 
-  def __init__(self, phase_result):
+  def __new__(cls, phase_result):
     if (phase_result is not None and
         not isinstance(phase_result, (openhtf.PhaseResult, ExceptionInfo)) and
         not isinstance(phase_result, threads.ThreadTerminationError)):
       raise InvalidPhaseResultError('Invalid phase result', phase_result)
-    super(PhaseExecutionOutcome, self).__init__(phase_result)
+    self = super(PhaseExecutionOutcome, cls).__new__(cls, phase_result)
+    return self
 
   @property
   def is_fail_and_continue(self):
@@ -158,7 +163,9 @@ class PhaseExecutorThread(threads.KillableThread):
 
   def _thread_exception(self, *args):
     self._phase_execution_outcome = PhaseExecutionOutcome(ExceptionInfo(*args))
-    self._test_state.logger.exception('Phase %s raised an exception', self.name)
+    self._test_state.logger.critical(
+        'Phase %s raised an exception', self._phase_desc.name)
+    return True  # Never propagate exceptions upward.
 
   def join_or_die(self):
     """Wait for thread to finish, returning a PhaseExecutionOutcome instance."""
@@ -193,6 +200,9 @@ class PhaseExecutor(object):
 
   def __init__(self, test_state):
     self.test_state = test_state
+    # This lock exists to prevent stop() calls from being ignored if called when
+    # _execute_phase_once is setting up the next phase thread.
+    self._current_phase_thread_lock = threading.Lock()
     self._current_phase_thread = None
     self._stopping = threading.Event()
 
@@ -209,7 +219,7 @@ class PhaseExecutor(object):
       hit its limit for repetitions.
     """
     repeat_count = 1
-    repeat_limit = phase.options.repeat_limit or sys.maxint
+    repeat_limit = phase.options.repeat_limit or sys.maxsize
     while not self._stopping.is_set():
       is_last_repeat = repeat_count >= repeat_limit
       phase_execution_outcome = self._execute_phase_once(phase, is_last_repeat)
@@ -242,21 +252,43 @@ class PhaseExecutor(object):
                 phase_desc.name)
       return PhaseExecutionOutcome(openhtf.PhaseResult.SKIP)
 
+    override_result = None
     with self.test_state.running_phase_context(phase_desc) as phase_state:
-      print ''
+      print ('')
       _LOG.debug('>>> Now executing phase: "%s" <<<', phase_desc.name)
       self._log_timeout_string(phase_desc)
-      phase_thread = PhaseExecutorThread(phase_desc, self.test_state)
-      phase_thread.start()
-      self._current_phase_thread = phase_thread
-      result = phase_state.result = phase_thread.join_or_die()
+      with self._current_phase_thread_lock:
+        # Checking _stopping must be in the lock context, otherwise there is a
+        # race condition: this thread checks _stopping and then switches to
+        # another thread where stop() sets _stopping and checks
+        # _current_phase_thread (which would not be set yet).  In that case, the
+        # new phase thread will be still be started.
+        if self._stopping.is_set():
+          # PhaseRecord will be written at this point, so ensure that it has a
+          # Killed result.
+          result = PhaseExecutionOutcome(threads.ThreadTerminationError())
+          phase_state.result = result
+          return result
+        phase_thread = PhaseExecutorThread(phase_desc, self.test_state)
+        phase_thread.start()
+        self._current_phase_thread = phase_thread
+
+      phase_state.result = phase_thread.join_or_die()
       if phase_state.result.is_repeat and is_last_repeat:
         _LOG.error('Phase returned REPEAT, exceeding repeat_limit.')
         phase_state.hit_repeat_limit = True
-        result = PhaseExecutionOutcome(openhtf.PhaseResult.STOP)
+        override_result = PhaseExecutionOutcome(openhtf.PhaseResult.STOP)
+      self._current_phase_thread = None
 
-    _LOG.debug('Phase finished with result: "%s"', result)
+    # Refresh the result in case a validation for a partially set measurement
+    # raised an exception.
+    result = override_result or phase_state.result
+    _LOG.debug('Phase %s finished with result %s', phase_desc.name,
+               result.phase_result)
     return result
+
+  def reset_stop(self):
+    self._stopping.clear()
 
   def stop(self, timeout_s=None):
     """Stops execution of the current phase, if any.
@@ -268,14 +300,14 @@ class PhaseExecutor(object):
       timeout_s: int or None, timeout in seconds to wait for the phase to stop.
     """
     self._stopping.set()
-    phase_thread = self._current_phase_thread
-
-    if not phase_thread:
-      return
+    with self._current_phase_thread_lock:
+      phase_thread = self._current_phase_thread
+      if not phase_thread:
+        return
 
     if phase_thread.is_alive():
       phase_thread.kill()
-    
+
       _LOG.debug('Waiting for cancelled phase to exit: %s', phase_thread)
       timeout = timeouts.PolledTimeout.from_seconds(timeout_s)
       while phase_thread.is_alive() and not timeout.has_expired():
@@ -284,6 +316,3 @@ class PhaseExecutor(object):
                  "didn't" if phase_thread.is_alive() else 'did')
     # Clear the currently running phase, whether it finished or timed out.
     self.test_state.stop_running_phase()
-
-    # Clear stopping once we're done, in case we're used againu
-    self._stopping.clear()

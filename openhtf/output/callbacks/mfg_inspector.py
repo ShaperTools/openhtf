@@ -33,6 +33,10 @@ import numbers
 import os
 import threading
 import zlib
+try:
+  from past.types import unicode
+except ImportError:
+  pass
 
 import httplib2
 import oauth2client.client
@@ -43,9 +47,8 @@ from openhtf.output import callbacks
 from openhtf.output.callbacks import json_factory
 from openhtf.output.proto import guzzle_pb2
 from openhtf.output.proto import test_runs_pb2
-from openhtf.output.proto import units_pb2
 from openhtf.util import validators
-
+import six
 
 # pylint: disable=no-member
 MIMETYPE_MAP = {
@@ -65,9 +68,10 @@ OUTCOME_MAP = {
 }
 
 UOM_CODE_MAP = {
-    u.GetOptions().Extensions[units_pb2.uom_code]: num
-    for num, u in
-    units_pb2.Units.UnitCode.DESCRIPTOR.values_by_number.iteritems()
+    u.GetOptions().Extensions[
+        test_runs_pb2.uom_code]: num
+    for num, u in six.iteritems(
+        test_runs_pb2.Units.UnitCode.DESCRIPTOR.values_by_number)
 }
 # pylint: enable=no-member
 
@@ -121,7 +125,7 @@ def _populate_header(record, testrun):
     attachment = testrun.info_parameters.add()
     attachment.name = 'config'
     attachment.value_binary = json.dumps(
-        record.metadata['config'], sort_keys=True, indent=4)
+        record.metadata['config'], sort_keys=True, indent=4).encode('utf-8')
 
 
 def _ensure_unique_parameter_name(name, used_parameter_names):
@@ -143,7 +147,7 @@ def _attach_json(record, testrun):
       sort_keys=True, indent=2).serialize_test_record(record)
   testrun_param = testrun.info_parameters.add()
   testrun_param.name = 'OpenHTF_record.json'
-  testrun_param.value_binary = record_json
+  testrun_param.value_binary = record_json.encode('utf-8')
   # pylint: disable=no-member
   testrun_param.type = test_runs_pb2.TEXT_UTF8
   # pylint: enable=no-member
@@ -151,12 +155,12 @@ def _attach_json(record, testrun):
 
 def _extract_attachments(phase, testrun, used_parameter_names):
   """Extract attachments, just copy them over."""
-  for name, (attachment_data, mimetype) in sorted(phase.attachments.items()):
+  for name, (attachment_data, mimetype) in sorted(six.iteritems(phase.attachments)):
     name = _ensure_unique_parameter_name(name, used_parameter_names)
     testrun_param = testrun.info_parameters.add()
     testrun_param.name = name
     if isinstance(attachment_data, unicode):
-      attachment_data = attachment_data.encode('utf8')
+      attachment_data = attachment_data.encode('utf-8')
     testrun_param.value_binary = attachment_data
     if mimetype in MIMETYPE_MAP:
       testrun_param.type = MIMETYPE_MAP[mimetype]
@@ -173,8 +177,8 @@ def _mangle_measurement(name, measured_value, measurement, mangled_parameters,
   We generate these by doing some name mangling, using some sane limits for
   very large multidimensional measurements.
   """
-  for coord, val in measured_value.value_dict.items(
-      )[:MAX_PARAMS_PER_MEASUREMENT]:
+  for coord, val in list(measured_value.value_dict.items(
+      ))[:MAX_PARAMS_PER_MEASUREMENT]:
     # Mangle names so they look like 'myparameter_Xsec_Ynm_ZHz'
     mangled_name = '_'.join([name] + [
         '%s%s' % (
@@ -214,7 +218,7 @@ def _extract_parameters(record, testrun, used_parameter_names):
   mangled_parameters = {}
   for phase in record.phases:
     _extract_attachments(phase, testrun, used_parameter_names)
-    for name, measurement in sorted(phase.measurements.items()):
+    for name, measurement in sorted(six.iteritems(phase.measurements)):
       tr_name = _ensure_unique_parameter_name(name, used_parameter_names)
       testrun_param = testrun.test_parameters.add()
       testrun_param.name = tr_name
@@ -258,7 +262,7 @@ def _extract_parameters(record, testrun, used_parameter_names):
         attachment = testrun.info_parameters.add()
         attachment.name = 'multidim_%s' % name
         dims = [{
-            'uom_suffix': d.suffix and d.suffix.encode('utf8'),
+            'uom_suffix': d.suffix,
             'uom_code': d.code}
                 for d in measurement.dimensions]
         # Refer to the module docstring for the expected schema.
@@ -266,7 +270,7 @@ def _extract_parameters(record, testrun, used_parameter_names):
             'outcome': str(testrun_param.status), 'name': name,
             'dimensions': dims,
             'value': value
-        }, sort_keys=True)
+        }, sort_keys=True).encode('utf-8')
         attachment.type = test_runs_pb2.MULTIDIM_JSON
         _mangle_measurement(
             name, measurement.measured_value, measurement, mangled_parameters,
@@ -284,7 +288,7 @@ def _extract_parameters(record, testrun, used_parameter_names):
 
 def _add_mangled_parameters(testrun, mangled_parameters, used_parameter_names):
   """Add any mangled parameters we generated from multidim measurements."""
-  for mangled_name, mangled_param in sorted(mangled_parameters.items()):
+  for mangled_name, mangled_param in sorted(six.iteritems(mangled_parameters)):
     if mangled_name != _ensure_unique_parameter_name(mangled_name,
                                                      used_parameter_names):
       logging.warning('Mangled name %s in use by non-mangled parameter',
@@ -450,7 +454,7 @@ class UploadToMfgInspector(object):
     if isinstance(testrun, test_runs_pb2.TestRun):
       serialized_run = testrun.SerializeToString()
     elif os.path.isfile(testrun):
-      with open(testrun) as testrun_file:
+      with open(testrun, 'rb') as testrun_file:
         serialized_run = testrun_file.read()
     else:
       InvalidTestRunError('Invalid test run data')

@@ -79,18 +79,27 @@ Example usage of a connection and stream:
 import collections
 import itertools
 import logging
-import Queue
 import threading
 
-import gflags
 from enum import Enum
 
 from openhtf.plugs.usb import adb_message
 from openhtf.plugs.usb import usb_exceptions
+from openhtf.util import argv
 from openhtf.util import exceptions
 from openhtf.util import timeouts
+from six.moves import queue
 
-FLAGS = gflags.FLAGS
+
+ADB_MESSAGE_LOG = False
+
+ARG_PARSER = argv.ModuleParser()
+ARG_PARSER.add_argument('--adb_messsage_log',
+                        action=argv.StoreTrueInModule,
+                        target='%s.ADB_MESSAGE_LOG' % __name__,
+                        help='Set to True to save all incoming and outgoing '
+                        'AdbMessages and print them on Close().')
+
 _LOG = logging.getLogger(__name__)
 
 # Maximum amount of data in an ADB packet, we would like to raise this, but the
@@ -145,7 +154,7 @@ class AdbStream(object):
     self._transport = transport
 
   def is_closed(self):
-    """Return True iff the stream is closed."""
+    """Return True if the stream is closed."""
     return self._transport.is_closed()
 
   def __str__(self):
@@ -421,11 +430,11 @@ class AdbStreamTransport(object): # pylint: disable=too-many-instance-attributes
     return self.is_open()
 
   def is_open(self):
-    """Return True iff the transport layer is open."""
+    """Return True if the transport layer is open."""
     return self.closed_state == self.ClosedState.OPEN
 
   def is_closed(self):
-    """Return true ifff the transport layer is closed."""
+    """Return true if the transport layer is closed."""
     return self.closed_state == self.ClosedState.CLOSED
 
   def enqueue_message(self, message, timeout):
@@ -558,7 +567,7 @@ class AdbConnection(object):
 
   def _make_stream_transport(self):
     """Create an AdbStreamTransport with a newly allocated local_id."""
-    msg_queue = Queue.Queue()
+    msg_queue = queue.Queue()
     with self._stream_transport_map_lock:
       # Start one past the last id we used, and grab the first available one.
       # This mimics the ADB behavior of 'increment an unsigned and let it
@@ -570,9 +579,9 @@ class AdbConnection(object):
       self._last_id_used = (self._last_id_used % STREAM_ID_LIMIT) + 1
       for local_id in itertools.islice(
           itertools.chain(
-              xrange(self._last_id_used, STREAM_ID_LIMIT),
-              xrange(1, self._last_id_used)), 64):
-        if local_id not in self._stream_transport_map.keys():
+              range(self._last_id_used, STREAM_ID_LIMIT),
+              range(1, self._last_id_used)), 64):
+        if local_id not in list(self._stream_transport_map.keys()):
           self._last_id_used = local_id
           break
       else:
@@ -600,7 +609,7 @@ class AdbConnection(object):
       The message read if it was for this stream, None otherwise.
 
     Raises:
-      AdbProtocolError: If we receive an unexepcted message type.
+      AdbProtocolError: If we receive an unexpected message type.
     """
     if message.command not in ('OKAY', 'CLSE', 'WRTE'):
       raise usb_exceptions.AdbProtocolError(
@@ -776,7 +785,7 @@ class AdbConnection(object):
       try:
         # Block for up to 10ms to rate-limit how fast we spin.
         return stream_transport.message_queue.get(True, .01)
-      except Queue.Empty:
+      except queue.Empty:
         pass
 
       # If someone else has the Lock, just keep checking our queue.
@@ -790,7 +799,7 @@ class AdbConnection(object):
         # Lock ourselves, we're sure there are no potentially in-flight reads.
         try:
           return stream_transport.message_queue.get_nowait()
-        except Queue.Empty:
+        except queue.Empty:
           pass
 
         while not timeout.has_expired():
@@ -809,7 +818,7 @@ class AdbConnection(object):
     # queued messages.
     try:
       return stream_transport.message_queue.get_nowait()
-    except Queue.Empty:
+    except queue.Empty:
       raise usb_exceptions.AdbStreamClosedError(
           'Attempt to read from closed or unknown %s', stream_transport)
 
@@ -849,7 +858,7 @@ class AdbConnection(object):
         unexpected way, or fails to respond appropriately to our CNXN request.
     """
     timeout = timeouts.PolledTimeout.from_millis(timeout_ms)
-    if FLAGS.adb_message_log:
+    if ADB_MESSAGE_LOG:
       adb_transport = adb_message.DebugAdbTransportAdapter(transport)
     else:
       adb_transport = adb_message.AdbTransportAdapter(transport)

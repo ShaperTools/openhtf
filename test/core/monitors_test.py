@@ -15,11 +15,10 @@
 import unittest
 import time
 import mock
-import Queue
 
-import openhtf
 from openhtf import plugs
 from openhtf.core import monitors
+from six.moves import queue
 
 
 class EmptyPlug(plugs.BasePlug):
@@ -29,7 +28,7 @@ class EmptyPlug(plugs.BasePlug):
 class TestMonitors(unittest.TestCase):
 
   def setUp(self):
-    self.test_state = mock.MagicMock()
+    self.test_state = mock.MagicMock(execution_uid='01234567890')
 
     def provide_plugs(plugs):
       return {name: cls() for name, cls in plugs}
@@ -38,7 +37,7 @@ class TestMonitors(unittest.TestCase):
   def test_basics(self):
     # Use a queue to ensure that we got at least 1 complete response. An Event
     # would cause a race condition, so we'd need 2 Events, so a Queue is easier.
-    q = Queue.Queue()
+    q = queue.Queue()
 
     def monitor_func(test):
       q.put(1)
@@ -66,7 +65,7 @@ class TestMonitors(unittest.TestCase):
                      msg="And it should be the monitor func's return val")
 
   def testPlugs(self):
-    q = Queue.Queue()
+    q = queue.Queue()
 
     @plugs.plug(empty=EmptyPlug)
     def monitor(test, empty):

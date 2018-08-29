@@ -96,8 +96,8 @@ self._my_config having a value of 'my_config_value'.
 
 import collections
 import functools
-import json
 import inspect
+import json
 import logging
 import threading
 import time
@@ -105,16 +105,36 @@ import types
 
 import mutablerecords
 
-import openhtf
 from openhtf import util
+import openhtf.core.phase_descriptor
 from openhtf.util import classproperty
 from openhtf.util import conf
 from openhtf.util import logs
-from openhtf.util import timeouts
-from openhtf.util import xmlrpcutil
+from openhtf.util import threads
+import six
 
 
 _LOG = logging.getLogger(__name__)
+
+
+conf.declare('plug_teardown_timeout_s', default_value=0, description=
+             'Timeout (in seconds) for each plug tearDown function if > 0; '
+             'otherwise, will wait an unlimited time.')
+
+
+PlugDescriptor = collections.namedtuple('PlugDescriptor', ['mro'])  # pylint: disable=invalid-name
+
+# Placeholder for a specific plug to be provided before test execution.
+#
+# Use the with_plugs() method to provide the plug before test execution. The
+# with_plugs() method checks to make sure the substitute plug is a subclass of
+# the PlugPlaceholder's base_class.
+PlugPlaceholder = collections.namedtuple('PlugPlaceholder', ['base_class'])  # pylint: disable=invalid-name
+
+
+class PhasePlug(mutablerecords.Record(
+    'PhasePlug', ['name', 'cls'], {'update_kwargs': True})):
+  """Information about the use of a plug in a phase."""
 
 
 class PlugOverrideError(Exception):
@@ -129,16 +149,6 @@ class InvalidPlugError(Exception):
   """Raised when a plug declaration or requested name is invalid."""
 
 
-class PlugPlaceholder(collections.namedtuple(
-    'PlugPlaceholder', ['base_class'])):
-  """Placeholder for a specific plug to be provided before test execution.
-
-  Utilize with_plugs method to provide the plug before test execution.  The
-  with_plugs method checks to make sure the substitute plug is a subclass of
-  the PlugPlaceholder's base_class.
-  """
-
-
 class BasePlug(object):
   """All plug types must subclass this type.
 
@@ -151,14 +161,18 @@ class BasePlug(object):
   enable_remote = False
   # Allow explicitly disabling remote access to specific attributes.
   disable_remote_attrs = set()
-  # Default logger to be used only in __init__ of subclasses..
+  # Override this to True in subclasses to support using with_plugs with this
+  # plug without needing to use placeholder.  This will only affect the classes
+  # that explicitly define this; subclasses do not share the declaration.
+  auto_placeholder = False
+  # Default logger to be used only in __init__ of subclasses.
   # This is overwritten both on the class and the instance so don't store
   # a copy of it anywhere.
   logger = _LOG
 
   @classproperty
   def placeholder(cls):
-    """Returns a PlugPlaceholder for calling class."""
+    """Returns a PlugPlaceholder for the calling class."""
     return PlugPlaceholder(cls)
 
   def _asdict(self):
@@ -168,7 +182,7 @@ class BasePlug(object):
     use by that phase.  The result is reported via the Station API by the
     PlugManager (if the Station API is enabled, which is the default).
 
-    Note this method is called in a tight loop, it is recommended that you
+    Note that this method is called in a tight loop, it is recommended that you
     decorate it with functions.call_at_most_every() to limit the frequency at
     which updates happen (pass a number of seconds to it to limit samples to
     once per that number of seconds).
@@ -178,6 +192,13 @@ class BasePlug(object):
   def tearDown(self):
     """This method is called automatically at the end of each Test execution."""
     pass
+
+  @classmethod
+  def uses_base_tear_down(cls):
+    """Checks whether the tearDown method is the BasePlug implementation."""
+    this_tear_down = getattr(cls, 'tearDown')
+    base_tear_down = getattr(BasePlug, 'tearDown')
+    return this_tear_down.__code__ is base_tear_down.__code__
 
 
 class FrontendAwareBasePlug(BasePlug, util.SubscribableStateMixin):
@@ -194,7 +215,7 @@ class FrontendAwareBasePlug(BasePlug, util.SubscribableStateMixin):
   enable_remote = True
 
 
-def plug(update_kwargs=True, **plugs):
+def plug(update_kwargs=True, **plugs_map):
   """Creates a decorator that passes in plugs when invoked.
 
   This function returns a decorator for a function that will replace positional
@@ -206,7 +227,7 @@ def plug(update_kwargs=True, **plugs):
 
   Args:
     update_kwargs: If true, makes the decorated phase take this plug as a kwarg.
-    plugs: Dict mapping name to Plug type.
+    **plugs_map: Dict mapping name to Plug type.
 
   Returns:
     A PhaseDescriptor that will pass plug instances in as kwargs when invoked.
@@ -214,8 +235,9 @@ def plug(update_kwargs=True, **plugs):
   Raises:
     InvalidPlugError: If a type is provided that is not a subclass of BasePlug.
   """
-  for a_plug in plugs.itervalues():
-    if not (isinstance(a_plug, PlugPlaceholder) or issubclass(a_plug, BasePlug)):
+  for a_plug in plugs_map.values():
+    if not (isinstance(a_plug, PlugPlaceholder)
+            or issubclass(a_plug, BasePlug)):
       raise InvalidPlugError(
           'Plug %s is not a subclass of plugs.BasePlug nor a placeholder '
           'for one' % a_plug)
@@ -234,16 +256,35 @@ def plug(update_kwargs=True, **plugs):
       DuplicatePlugError:  If a plug name is declared twice for the
           same function.
     """
-    phase_desc = openhtf.PhaseDescriptor.wrap_or_copy(func)
-    duplicates = frozenset(p.name for p in phase_desc.plugs) & frozenset(plugs)
+    phase = openhtf.core.phase_descriptor.PhaseDescriptor.wrap_or_copy(func)
+    duplicates = (frozenset(p.name for p in phase.plugs) &
+                  frozenset(plugs_map))
     if duplicates:
       raise DuplicatePlugError(
           'Plugs %s required multiple times on phase %s' % (duplicates, func))
-    phase_desc.plugs.extend([
-        openhtf.PhasePlug(name, a_plug, update_kwargs=update_kwargs)
-        for name, a_plug in plugs.iteritems()])
-    return phase_desc
+
+    phase.plugs.extend([
+        PhasePlug(name, a_plug, update_kwargs=update_kwargs)
+        for name, a_plug in six.iteritems(plugs_map)])
+    return phase
   return result
+
+
+class _PlugTearDownThread(threads.KillableThread):
+  """Killable thread that runs a plug's tearDown function."""
+
+  def __init__(self, a_plug, *args, **kwargs):
+    super(_PlugTearDownThread, self).__init__(*args, **kwargs)
+    self._plug = a_plug
+
+  def _thread_proc(self):
+    try:
+      self._plug.tearDown()
+    except Exception:  # pylint: disable=broad-except
+      # Including the stack trace from ThreadTerminationErrors received when
+      # killed.
+      _LOG.warning('Exception calling tearDown on %s:',
+                   self._plug, exc_info=True)
 
 
 class PlugManager(object):
@@ -258,67 +299,64 @@ class PlugManager(object):
 
   Attributes:
     _plug_types: Initial set of plug types, additional plug types may be
-        passed into calls to InitializePlugs().
-    _plugs_by_type: Dict mapping plug type to instantiated plug.
+        passed into calls to initialize_plugs().
+    _logger_name: The name of this test's plug logger. The loggers passed to the
+        plugs will be children of this logger.
+    _plugs_by_type: Dict mapping plug type to plug instance.
+    _plugs_by_name: Dict mapping plug name to plug instance.
+    _plug_descriptors: Dict mapping plug type to plug descriptor.
   """
 
-  def __init__(self, plug_types=None, logger=None):
+  def __init__(self, plug_types=None, record_logger_name=None):
     self._plug_types = plug_types or set()
-    if any(isinstance(plug, PlugPlaceholder) for plug in self._plug_types):
-      raise InvalidPlugError('Plug %s is a placeholder, replace it using '
-                             'with_plugs()' % plug)
-    self._logger = logger
+    for plug in self._plug_types:
+      if isinstance(plug, PlugPlaceholder):
+        raise InvalidPlugError('Plug %s is a placeholder, replace it using '
+                               'with_plugs().' % plug)
     self._plugs_by_type = {}
     self._plugs_by_name = {}
-    self._xmlrpc_server = None
+    self._plug_descriptors = {}
+    self.logger = logging.getLogger(record_logger_name).getChild('plug')
 
   def _asdict(self):
-    return {'plug_states': {name: plug._asdict()
-                            for name, plug in self._plugs_by_name.iteritems()},
-            'xmlrpc_port': self._xmlrpc_server and
-                           self._xmlrpc_server.socket.getsockname()[1]}
+    return {
+        'plug_descriptors': {
+            name: dict(descriptor._asdict())  # Convert OrderedDict to dict.
+            for name, descriptor in six.iteritems(self._plug_descriptors)
+        },
+        'plug_states': {
+            name: plug._asdict()
+            for name, plug in six.iteritems(self._plugs_by_name)
+        },
+    }
 
-  def _create_or_update_rpc_server(self):
-    """Create or update the XML-RPC server for remote access to plugs.
+  def _make_plug_descriptor(self, plug_type):
+    """Returns the plug descriptor, containing info about this plug type."""
+    return PlugDescriptor(self.get_plug_mro(plug_type))
 
-    We register on the server the public methods (ones that don't start with _)
-    of those plugs which have enable_remote set to True.
+  def get_plug_mro(self, plug_type):
+    """Returns a list of names identifying the plug classes in the plug's MRO.
 
-    Those methods are then available via RPC calls to:
-      'plugs.<plug_module>.<plug_type>.<plug_method>'
+    For example:
+        ['openhtf.plugs.user_input.UserInput']
+    Or:
+        ['openhtf.plugs.user_input.UserInput',
+         'my_module.advanced_user_input.AdvancedUserInput']
     """
+    ignored_classes = (BasePlug, FrontendAwareBasePlug)
+    return [
+        self.get_plug_name(base_class) for base_class in plug_type.mro()
+        if (issubclass(base_class, BasePlug) and
+            base_class not in ignored_classes)
+    ]
 
-    # Create a list of (method, method_name) pairs.
-    plug_methods = []
+  def get_plug_name(self, plug_type):
+    """Returns the plug's name, which is the class name and module.
 
-    for name, plug in self._plugs_by_name.iteritems():
-      if not plug.enable_remote:
-        continue
-
-      for attr_name in dir(plug):
-        attr = getattr(plug, attr_name)
-        if (isinstance(attr, types.MethodType) and
-            not attr_name.startswith('_') and
-            attr_name != 'tearDown' and
-            attr_name not in plug.disable_remote_attrs):
-          plug_methods.append((attr, '.'.join(('plugs', name, attr_name))))
-
-    if not plug_methods or conf.station_api_port is None:
-      return
-
-    if not self._xmlrpc_server:
-      _LOG.debug('Starting PlugManager XML-RPC server.')
-      self._xmlrpc_server = xmlrpcutil.SimpleThreadedXmlRpcServer((
-        conf.station_api_bind_address, 0))
-      self._xmlrpc_server.register_introspection_functions()
-      server_thread = threading.Thread(target=self._xmlrpc_server.serve_forever,
-                                       name='PlugManager-XMLRPCServer')
-      server_thread.daemon = True
-      server_thread.start()
-
-    for method, name in plug_methods:
-      self._xmlrpc_server.register_function(method, name=name)
-
+    For example:
+        'openhtf.plugs.user_input.UserInput'
+    """
+    return '%s.%s' % (plug_type.__module__, plug_type.__name__)
 
   def initialize_plugs(self, plug_types=None):
     """Instantiate required plugs.
@@ -333,6 +371,9 @@ class PlugManager(object):
     """
     types = plug_types if plug_types is not None else self._plug_types
     for plug_type in types:
+      # Create a logger for this plug. All plug loggers go under the 'plug'
+      # sub-logger in the logger hierarchy.
+      plug_logger = self.logger.getChild(plug_type.__name__)
       if plug_type in self._plugs_by_type:
         continue
       try:
@@ -345,7 +386,7 @@ class PlugManager(object):
               'Do not override "logger" in your plugs.', plug_type)
 
         # Override the logger so that __init__'s logging goes into the record.
-        plug_type.logger = self._logger
+        plug_type.logger = plug_logger
         try:
           plug_instance = plug_type()
         finally:
@@ -359,13 +400,12 @@ class PlugManager(object):
               'Do not set "self.logger" in __init__ in your plugs', plug_type)
         else:
           # Now the instance has its own copy of the test logger.
-          plug_instance.logger = self._logger
+          plug_instance.logger = plug_logger
       except Exception:  # pylint: disable=broad-except
-        self._logger.exception('Exception instantiating plug type %s', plug_type)
+        plug_logger.exception('Exception instantiating plug type %s', plug_type)
         self.tear_down_plugs()
         raise
       self.update_plug(plug_type, plug_instance)
-    self._create_or_update_rpc_server()
 
   def get_plug_by_class_path(self, plug_name):
     """Get a plug instance by name (class path).
@@ -395,9 +435,10 @@ class PlugManager(object):
     self._plug_types.add(plug_type)
     if plug_type in self._plugs_by_type:
       self._plugs_by_type[plug_type].tearDown()
+    plug_name = self.get_plug_name(plug_type)
     self._plugs_by_type[plug_type] = plug_value
-    self._plugs_by_name[
-        '.'.join((plug_type.__module__, plug_type.__name__))] = plug_value
+    self._plugs_by_name[plug_name] = plug_value
+    self._plug_descriptors[plug_name] = self._make_plug_descriptor(plug_type)
 
   def provide_plugs(self, plug_name_map):
     """Provide the requested plugs [(name, type),] as {name: plug instance}."""
@@ -413,18 +454,22 @@ class PlugManager(object):
     Any exceptions in tearDown() methods are logged, but do not get raised
     by this method.
     """
-    if self._xmlrpc_server:
-      _LOG.debug('Shutting down Plug XMLRPC Server.')
-      self._xmlrpc_server.shutdown()
-      self._xmlrpc_server.server_close()
-      self._xmlrpc_server = None
-
     _LOG.debug('Tearing down all plugs.')
-    for a_plug in self._plugs_by_type.itervalues():
-      try:
-        a_plug.tearDown()
-      except Exception:  # pylint: disable=broad-except
-        _LOG.warning('Exception calling tearDown on %s:', a_plug, exc_info=True)
+    for plug_type, plug_instance in six.iteritems(self._plugs_by_type):
+      if plug_instance.uses_base_tear_down():
+        name = '<PlugTearDownThread: BasePlug No-Op for %s>' % plug_type
+      else:
+        name = '<PlugTearDownThread: %s>' % plug_type
+      thread = _PlugTearDownThread(plug_instance, name=name)
+      thread.start()
+      timeout_s = (conf.plug_teardown_timeout_s
+                   if conf.plug_teardown_timeout_s
+                   else None)
+      thread.join(timeout_s)
+      if thread.is_alive():
+        thread.kill()
+        _LOG.warning('Killed tearDown for plug %s after timeout.',
+                     plug_instance)
     self._plugs_by_type.clear()
     self._plugs_by_name.clear()
 
@@ -461,5 +506,5 @@ class PlugManager(object):
 
   def get_frontend_aware_plug_names(self):
     """Returns the names of frontend-aware plugs."""
-    return [name for name, plug in self._plugs_by_name.iteritems()
+    return [name for name, plug in six.iteritems(self._plugs_by_name)
             if isinstance(plug, FrontendAwareBasePlug)]

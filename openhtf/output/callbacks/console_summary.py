@@ -5,6 +5,7 @@ import sys
 
 from openhtf.core import test_record
 from openhtf.core import measurements as meas_module
+import six
 
 
 class ConsoleSummary():
@@ -60,7 +61,7 @@ class ConsoleSummary():
                 measured_val_str = measured_val_str[:103] + self.ORANGE + " [Data Truncated]" + self.RESET
             output_lines.append('%smeasured_value: %s' %
                                 (self.indent*2, measured_val_str))
-            
+
             output_lines.append('%svalidators:' % (self.indent*2))
             for validator in measurement.validators:
               output_lines.append('%svalidator: %s' %
