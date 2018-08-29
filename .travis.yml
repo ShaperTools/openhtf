@@ -1,23 +1,30 @@
 language: python
-python:
-- '2.7'
+matrix:
+  include:
+    - python: 2.7
+      env: TOXENV=py27
+    - python: 3.6
+      env: TOXENV=py36
 addons:
   apt:
     packages:
+    - python3
+    - python3-pip
     - swig
     - libusb-1.0-0-dev
     - libprotobuf-dev
-    - protobuf-compiler
 cache:
   pip: true
   apt: true
   directories:
   - $HOME/.cache/pip
-env:
-- TOXENV=py27
 install:
 - pip install tox coveralls
 - pip install -e .
+- wget https://github.com/google/protobuf/releases/download/v3.5.0/protoc-3.5.0-linux-x86_64.zip
+- unzip protoc-3.5.0-linux-x86_64.zip
+- sudo cp bin/protoc /usr/bin/protoc && sudo chmod 777 /usr/bin/protoc
+- protoc --version
 script: tox
 after_success:
 - coveralls

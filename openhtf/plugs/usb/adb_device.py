@@ -30,7 +30,6 @@ function, but rather a USB function - listing devices with a specific interface
 class, subclass, and protocol.
 """
 
-import cStringIO
 import logging
 import os.path
 
@@ -47,6 +46,7 @@ from openhtf.plugs.usb import shell_service
 from openhtf.plugs.usb import usb_exceptions
 
 from openhtf.util import timeouts
+import six
 
 # USB interface class, subclass, and protocol for matching against.
 CLASS = 0xFF
@@ -142,7 +142,7 @@ class AdbDevice(object):
       timeout_ms: Expected timeout for any part of the push.
     """
     mtime = 0
-    if isinstance(source_file, basestring):
+    if isinstance(source_file, six.string_types):
       mtime = os.path.getmtime(source_file)
       source_file = open(source_file)
 
@@ -161,15 +161,14 @@ class AdbDevice(object):
     Returns:
       The file data if dest_file is not set, None otherwise.
     """
-    if isinstance(dest_file, basestring):
+    should_return_data = dest_file is None
+    if isinstance(dest_file, six.string_types):
       dest_file = open(dest_file, 'w')
-    elif not dest_file:
-      dest_file = cStringIO.StringIO()
+    elif dest_file is None:
+      dest_file = six.StringIO()
     self.filesync_service.recv(device_filename, dest_file,
                                timeouts.PolledTimeout.from_millis(timeout_ms))
-    # An empty call to cStringIO.StringIO returns an instance of
-    # cStringIO.OutputType.
-    if isinstance(dest_file, cStringIO.OutputType):
+    if should_return_data:
       return dest_file.getvalue()
 
   def list(self, device_path, timeout_ms=None):

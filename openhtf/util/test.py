@@ -127,10 +127,14 @@ from openhtf import plugs
 from openhtf import util
 from openhtf.core import measurements
 from openhtf.core import phase_executor
-from openhtf.core import station_api
+from openhtf.core import test_descriptor
 from openhtf.core import test_record
 from openhtf.core import test_state
-from openhtf.util import conf
+from openhtf.plugs import device_wrapping
+from openhtf.util import logs
+import six
+
+logs.CLI_LOGGING_VERBOSITY = 2
 
 
 class InvalidTestError(Exception):
@@ -159,8 +163,7 @@ class PhaseOrTestIterator(collections.Iterator):
     # Since we want to run single phases, we instantiate our own PlugManager.
     # Don't do this sort of thing outside OpenHTF unless you really know what
     # you're doing (http://imgur.com/iwBCmQe).
-    self.plug_manager = plugs.PlugManager(
-        logger=logging.getLogger('test.PlugManager'))
+    self.plug_manager = plugs.PlugManager(record_logger_name='test.PlugManager')
     self.iterator = iterator
     self.mock_plugs = mock_plugs
     self.last_result = None
@@ -171,19 +174,23 @@ class PhaseOrTestIterator(collections.Iterator):
     plug_types = list(plug_types)
     self.plug_manager.initialize_plugs(plug_cls for plug_cls in plug_types if
                                        plug_cls not in self.mock_plugs)
-    for plug_type, plug_value in self.mock_plugs.iteritems():
+    for plug_type, plug_value in six.iteritems(self.mock_plugs):
       self.plug_manager.update_plug(plug_type, plug_value)
 
-  @conf.save_and_restore(station_api_port=None, enable_station_discovery=False)
   def _handle_phase(self, phase_desc):
     """Handle execution of a single test phase."""
+    logs.configure_logging()
     self._initialize_plugs(phase_plug.cls for phase_plug in phase_desc.plugs)
 
     # Cobble together a fake TestState to pass to the test phase.
+    test_options = test_descriptor.TestOptions()
     with mock.patch(
         'openhtf.plugs.PlugManager', new=lambda _, __: self.plug_manager):
-      test_state_ = test_state.TestState(openhtf.TestDescriptor(
-          (phase_desc,), phase_desc.code_info, {}), 'Unittest:StubTest:UID')
+      test_state_ = test_state.TestState(
+          openhtf.TestDescriptor((phase_desc,), phase_desc.code_info, {}),
+          'Unittest:StubTest:UID',
+          test_options
+      )
       test_state_.mark_test_started()
 
     # Actually execute the phase, saving the result in our return value.
@@ -192,11 +199,10 @@ class PhaseOrTestIterator(collections.Iterator):
     executor._execute_phase_once(phase_desc, is_last_repeat=False)
     return test_state_.test_record.phases[-1]
 
-  @conf.save_and_restore(station_api_port=None, enable_station_discovery=False)
   def _handle_test(self, test):
     self._initialize_plugs(test.descriptor.plug_types)
     # Make sure we inject our mock plug instances.
-    for plug_type, plug_value in self.mock_plugs.iteritems():
+    for plug_type, plug_value in six.iteritems(self.mock_plugs):
       self.plug_manager.update_plug(plug_type, plug_value)
 
     # We'll need a place to stash the resulting TestRecord.
@@ -211,11 +217,24 @@ class PhaseOrTestIterator(collections.Iterator):
 
     return record_saver.result
 
+  def __next__(self):
+    phase_or_test = self.iterator.send(self.last_result)
+    if isinstance(phase_or_test, openhtf.Test):
+      self.last_result = self._handle_test(phase_or_test)
+    elif not isinstance(phase_or_test, collections.Callable):
+      raise InvalidTestError(
+          'methods decorated with patch_plugs must yield Test instances or '
+          'individual test phases', phase_or_test)
+    else:
+      self.last_result = self._handle_phase(
+          openhtf.PhaseDescriptor.wrap_or_copy(phase_or_test))
+    return phase_or_test, self.last_result
+
   def next(self):
     phase_or_test = self.iterator.send(self.last_result)
     if isinstance(phase_or_test, openhtf.Test):
       self.last_result = self._handle_test(phase_or_test)
-    elif not callable(phase_or_test):
+    elif not isinstance(phase_or_test, collections.Callable):
       raise InvalidTestError(
           'methods decorated with patch_plugs must yield Test instances or '
           'individual test phases', phase_or_test)
@@ -285,8 +304,8 @@ def patch_plugs(**mock_plugs):
     # Make MagicMock instances for the plugs.
     plug_kwargs = {}  # kwargs to pass to test func.
     plug_typemap = {}  # typemap for PlugManager, maps type to instance.
-    for plug_arg_name, plug_fullname in mock_plugs.iteritems():
-      if isinstance(plug_fullname, basestring):
+    for plug_arg_name, plug_fullname in six.iteritems(mock_plugs):
+      if isinstance(plug_fullname, six.string_types):
         try:
           plug_module, plug_typename = plug_fullname.rsplit('.', 1)
           plug_type = getattr(sys.modules[plug_module], plug_typename)
@@ -299,7 +318,13 @@ def patch_plugs(**mock_plugs):
       else:
         raise ValueError('Invalid plug type specification %s="%s"' % (
             plug_arg_name, plug_fullname))
-      plug_mock = mock.create_autospec(plug_type, spec_set=True, instance=True)
+      if issubclass(plug_type, device_wrapping.DeviceWrappingPlug):
+        # We can't strictly spec because calls to attributes are proxied to the
+        # underlying device.
+        plug_mock = mock.MagicMock()
+      else:
+        plug_mock = mock.create_autospec(plug_type, spec_set=True,
+                                         instance=True)
       plug_typemap[plug_type] = plug_mock
       plug_kwargs[plug_arg_name] = plug_mock
 
@@ -321,12 +346,7 @@ class TestCase(unittest.TestCase):
     test_method = getattr(self, methodName)
     if inspect.isgeneratorfunction(test_method):
       raise ValueError(
-          "%s yields without @openhtf.util.test.yields_phases" % methodName)
-    
-    # Mock the station api server.
-    station_api_server_patcher = mock.patch.object(station_api, 'ApiServer')
-    self.mock_api_server = station_api_server_patcher.start()
-    self.addCleanup(self.mock_api_server.stop)
+          '%s yields without @openhtf.util.test.yields_phases' % methodName)
 
   def _AssertPhaseOrTestRecord(func):  # pylint: disable=no-self-argument,invalid-name
     """Decorator for automatically invoking self.assertTestPhases when needed.
@@ -355,7 +375,7 @@ class TestCase(unittest.TestCase):
             exc_info = sys.exc_info()
         else:
           if exc_info:
-            raise exc_info[0], exc_info[1], exc_info[2]
+            raise exc_info[0](exc_info[1]).raise_with_traceback(exc_info[2])
       elif isinstance(phase_or_test_record, test_record.PhaseRecord):
         func(self, phase_or_test_record, *args)
       else:
@@ -365,13 +385,16 @@ class TestCase(unittest.TestCase):
   ##### TestRecord Assertions #####
 
   def assertTestPass(self, test_rec):
-    self.assertEquals(test_record.Outcome.PASS, test_rec.outcome)
+    self.assertEqual(test_record.Outcome.PASS, test_rec.outcome)
 
   def assertTestFail(self, test_rec):
-    self.assertEquals(test_record.Outcome.FAIL, test_rec.outcome)
+    self.assertEqual(test_record.Outcome.FAIL, test_rec.outcome)
+
+  def assertTestAborted(self, test_rec):
+    self.assertEqual(test_record.Outcome.ABORTED, test_rec.outcome)
 
   def assertTestError(self, test_rec, exc_type=None):
-    self.assertEquals(test_record.Outcome.ERROR, test_rec.outcome)
+    self.assertEqual(test_record.Outcome.ERROR, test_rec.outcome)
     if exc_type:
       self.assertPhaseError(test_rec.phases[-1], exc_type)
 
@@ -442,7 +465,7 @@ class TestCase(unittest.TestCase):
         phase_record.measurements[measurement].measured_value.is_value_set,
         'Measurement %s not set' % measurement)
     if value is not mock.ANY:
-      self.assertEquals(
+      self.assertEqual(
           value, phase_record.measurements[measurement].measured_value.value,
           'Measurement %s has wrong value: expected %s, got %s' %
           (measurement, value,

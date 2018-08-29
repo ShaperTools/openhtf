@@ -27,18 +27,21 @@ To use these plugs:
   def MyPhase(test, adb):
     adb.Shell('ls')
 """
-import commands
+import argparse
 import logging
 import time
 
 import openhtf.plugs as plugs
+from openhtf.plugs import cambrionix
 from openhtf.plugs.usb import adb_device
+from openhtf.plugs.usb import adb_protocol
 from openhtf.plugs.usb import fastboot_device
+from openhtf.plugs.usb import fastboot_protocol
 from openhtf.plugs.usb import local_usb
 from openhtf.plugs.usb import usb_exceptions
-from openhtf.plugs import cambrionix
 from openhtf.plugs.user_input import prompt_for_test_start
 from openhtf.util import conf
+from openhtf.util import functions
 
 _LOG = logging.getLogger(__name__)
 
@@ -46,7 +49,17 @@ conf.declare('libusb_rsa_key', 'A private key file for use by libusb auth.')
 conf.declare('remote_usb', 'ethersync or other')
 conf.declare('ethersync', 'ethersync configuration')
 
-def _open_usb_handle(**kwargs):
+
+@functions.call_once
+def init_dependent_flags():
+  parser = argparse.ArgumentParser(
+      'USB Plug flags', parents=[
+          adb_protocol.ARG_PARSER, fastboot_protocol.ARG_PARSER],
+      add_help=False)
+  parser.parse_known_args()
+
+
+def _open_usb_handle(serial_number=None, **kwargs):
   """Open a UsbHandle subclass, based on configuration.
 
   If configuration 'remote_usb' is set, use it to connect to remote usb,
@@ -60,13 +73,13 @@ def _open_usb_handle(**kwargs):
        plug_port: 5
 
   Args:
+    serial_number: Optional serial number to connect to.
     **kwargs: Arguments to pass to respective handle's Open() method.
 
   Returns:
     Instance of UsbHandle.
   """
-
-  serial = None
+  init_dependent_flags()
   remote_usb = conf.remote_usb
   if remote_usb:
     if remote_usb.strip() == 'ethersync':
@@ -78,9 +91,9 @@ def _open_usb_handle(**kwargs):
         raise ValueError('Ethersync needs mac_addr and plug_port to be set')
       else:
         ethersync = cambrionix.EtherSync(mac_addr)
-        serial = ethersync.get_usb_serial(port)
+        serial_number = ethersync.get_usb_serial(port)
 
-  return local_usb.LibUsbHandle.open(serial_number=serial, **kwargs)
+  return local_usb.LibUsbHandle.open(serial_number=serial_number, **kwargs)
 
 
 class FastbootPlug(plugs.BasePlug):
@@ -104,20 +117,40 @@ class FastbootPlug(plugs.BasePlug):
 class AdbPlug(plugs.BasePlug):
   """Plug that provides ADB."""
 
+  serial_number = None
+
   def __init__(self):
-    kwargs = {}
     if conf.libusb_rsa_key:
-      kwargs['rsa_keys'] = [adb_device.M2CryptoSigner(conf.libusb_rsa_key)]
+      self._rsa_keys = [adb_device.M2CryptoSigner(conf.libusb_rsa_key)]
+    else:
+      self._rsa_keys = None
+    self._device = None
+    self.connect()
+
+  def tearDown(self):
+    if self._device:
+      self._device.close()
+
+  def connect(self):
+    if self._device:
+      try:
+        self._device.close()
+      except (usb_exceptions.UsbWriteFailedError,
+              usb_exceptions.UsbReadFailedError):
+        pass
+      self._device = None
+
+    kwargs = {}
+    if self._rsa_keys:
+      kwargs['rsa_keys'] = self._rsa_keys
 
     self._device = adb_device.AdbDevice.connect(
         _open_usb_handle(
             interface_class=adb_device.CLASS,
             interface_subclass=adb_device.SUBCLASS,
-            interface_protocol=adb_device.PROTOCOL),
+            interface_protocol=adb_device.PROTOCOL,
+            serial_number=self.serial_number),
         **kwargs)
-
-  def tearDown(self):
-    self._device.close()
 
   def __getattr__(self, attr):
     """Forward other attributes to the device."""

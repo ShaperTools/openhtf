@@ -1,3 +1,4 @@
+# -*- coding: utf8 -*-
 # Copyright 2016 Google Inc. All Rights Reserved.
 
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,7 +24,15 @@ class TestLogs(unittest.TestCase):
 
   def test_log_once(self):
     mock_log = mock.Mock()
-    for _ in xrange(10):
+    for _ in range(10):
       logs.log_once(mock_log, 'Message 1', 'arg1')
 
     assert mock_log.call_count == 1
+
+  def test_log_once_utf8(self):
+    mock_log = mock.Mock()
+    for _ in range(10):
+      logs.log_once(mock_log, u'状态是', 'arg1')
+
+    assert mock_log.call_count == 1
+

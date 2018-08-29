@@ -58,7 +58,9 @@ import abc
 import numbers
 import re
 import sys
+from future.utils import with_metaclass
 from openhtf import util
+import six
 
 _VALIDATORS = {}
 
@@ -81,17 +83,13 @@ def create_validator(name, *args, **kwargs):
 _identity = lambda x: x
 
 
-class ValidatorBase(object):
-  __metaclass__ = abc.ABCMeta
-
+class ValidatorBase(with_metaclass(abc.ABCMeta, object)):
   @abc.abstractmethod
   def __call__(self, value):
     """Should validate value, returning a boolean result."""
 
 
-class RangeValidatorBase(ValidatorBase):
-  __metaclass__ = abc.ABCMeta
-
+class RangeValidatorBase(with_metaclass(abc.ABCMeta, ValidatorBase)):
   @abc.abstractproperty
   def minimum(self):
     """Should return the minimum, inclusive value of the range."""
@@ -120,16 +118,18 @@ class InRange(RangeValidatorBase):
 
   @property
   def minimum(self):
-    return self._minimum
+    converter = self._type if self._type is not None else _identity
+    return converter(self._minimum)
 
   @property
   def maximum(self):
-    return self._maximum
+    converter = self._type if self._type is not None else _identity
+    return converter(self._maximum)
 
   def with_args(self, **kwargs):
     return type(self)(
-        minimum=util.format_string(self.minimum, kwargs),
-        maximum=util.format_string(self.maximum, kwargs),
+        minimum=util.format_string(self._minimum, kwargs),
+        maximum=util.format_string(self._maximum, kwargs),
         type=self._type,
     )
 
@@ -140,12 +140,9 @@ class InRange(RangeValidatorBase):
     # Check for nan
     if math.isnan(value):
       return False
-    converter = self._type or _identity
-    minimum = converter(self.minimum)
-    maximum = converter(self.maximum)
-    if minimum is not None and value < minimum:
+    if self.minimum is not None and value < self.minimum:
       return False
-    if maximum is not None and value > maximum:
+    if self.maximum is not None and value > self.maximum:
       return False
     return True
 
@@ -175,8 +172,8 @@ register(in_range, name='in_range')
 def equals(value, type=None):
   if isinstance(value, numbers.Number):
     return InRange(minimum=value, maximum=value, type=type)
-  elif isinstance(value, basestring):
-    assert type is None or issubclass(type, basestring), (
+  elif isinstance(value, six.string_types):
+    assert type is None or issubclass(type, six.string_types), (
         'Cannot use a non-string type when matching a string')
     return matches_regex('^{}$'.format(re.escape(value)))
   else:
@@ -187,12 +184,16 @@ class Equals(object):
   """Validator to verify an object is equal to the expected value."""
 
   def __init__(self, expected, type=None):
-    self.expected = expected
+    self._expected = expected
     self._type = type
 
+  @property
+  def expected(self):
+    converter = self._type if self._type is not None else _identity
+    return converter(self._expected)
+
   def __call__(self, value):
-    converter = self._type or _identity
-    return value == converter(self.expected)
+    return value == self.expected
 
   def __str__(self):
     return "'x' is equal to '%s'" % self.expected
@@ -239,12 +240,16 @@ class WithinPercent(RangeValidatorBase):
     self.percent = percent
 
   @property
+  def _applied_percent(self):
+    return abs(self.expected * self.percent / 100.0)
+
+  @property
   def minimum(self):
-    return (1.0 - self.percent / 100.0) * self.expected
+    return self.expected - self._applied_percent
 
   @property
   def maximum(self):
-    return (1.0 + self.percent / 100.0) * self.expected
+    return self.expected + self._applied_percent
 
   def __call__(self, value):
     return self.minimum <= value <= self.maximum

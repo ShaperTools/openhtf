@@ -22,7 +22,7 @@ goals of OpenHTF.
 ### Process Overview
 Our code review process generally follows a predictable flow:
 
-1. Fork the OpenHTF repository on github.
+1. Fork the OpenHTF repository on Github.
 2. Make commits to your fork.
 3. Run unit tests and lint and ensure they still pass.
 4. Submit a pull request (PR) to merge your fork into the official repo.
@@ -50,14 +50,14 @@ sign-off obtained from a majority of the official maintainers.
 
 #### Mergeability
 When making a PR, it helps to try to keep it mergeable into the official repo.
-In practice, this usually means periodically rebasing on google/openhtf:master
+In practice, this usually means periodically rebasing on `google/openhtf:master`
 when there are changes upstream after your PR was created.
 
 
 #### Commits
 We generally tend toward squashing commits on merge rather than filling our git
 log with merge commits. Sometimes, however, especially for large, sweeping
-changes, it makes sense to preserve multple commits in the history. If you're
+changes, it makes sense to preserve multiple commits in the history. If you're
 authoring such a PR, consider using a rebase with squashes and fixups to reduce 
 the commit history down to a commit per salient change.
 
@@ -176,7 +176,7 @@ fits in based on what it does.
     | 
     |           Generic utility functions and miscellaneous tools.
     |           The contents of this submodule should be general enough to be 
-    |           useable outside of OpenHTF, meaning it should not be dependent 
+    |           usable outside of OpenHTF, meaning it should not be dependent
     |           on other code in the OpenHTF package.
     |
     |
@@ -195,7 +195,7 @@ environments. You'll need both in order to work with the OpenHTF codebase.
 
 Pip installs dependencies from [PyPI](https://pypi.python.org/) (the Python
 package index), but it can also install local packages in development mode
-(using the -e flag). This causes pip to install the dependency using symlinks
+(using the `-e` flag). This causes pip to install the dependency using symlinks
 from the filesystem so changes made to those files are instantly reflected.
 
 Neither virtualenv nor OpenHTF's Python dependencies are included in the
@@ -210,11 +210,11 @@ accordingly.
 
 ```bash
 # Clone into the repo.
-git clone git@github.com:google/openhtf.git
+git clone https://github.com/google/openhtf.git
 
 # Install system-level third-party dependencies.
-sudo apt-get install python-pip swig libssl-dev python-dev libffi-dev \ 
-protobuf-compiler libprotobuf-dev
+sudo apt-get install python-pip swig libssl-dev python-dev python3-dev \
+libffi-dev protobuf-compiler libprotobuf-dev
 
 # Make sure pip is up-to-date.
 sudo pip install --upgrade pip
@@ -231,12 +231,15 @@ virtualenv venv
 # Activate the new virtualenv.
 . venv/bin/activate
 
+# Update setuptools.
+pip install setuptools --upgrade
+
 # Install openhtf into the virtualenv in dev mode.
 python setup.py develop
 ```
 
 ### MacOS
-We will use [Homebrew](http://brew.sh/) to install our dependencies and Pip to set up the virtualenv. We recommend installing [Xcode](https://developer.apple.com/xcode/) first as the GCC compiler will be needed for both; however, other GCC compilers not associated with Xcode may work just as well. 
+We will use [Homebrew](https://brew.sh/) to install our dependencies and Pip to set up the virtualenv. We recommend installing [Xcode](https://developer.apple.com/xcode/) first as the GCC compiler will be needed for both; however, other GCC compilers not associated with Xcode may work just as well. 
 
 ```bash
 # Install dependencies.
