@@ -97,6 +97,7 @@ def banner_print(msg, color='', width=60, file=sys.stdout, logger=_LOG):
     ======================== Foo Bar Baz =======================
 
   """
+  msg = msg.encode('utf-8')
   if logger:
     logger.debug(ANSI_ESC_RE.sub('', msg))
   if CLI_QUIET:
@@ -121,6 +122,7 @@ def bracket_print(msg, color='', width=8, file=sys.stdout):
     file: A file object to which the bracketed text will be written. Intended
         for use with CLI output file objects like sys.stdout.
     """
+  msg = msg.encode('utf-8')
   if CLI_QUIET:
     return
   lpad = int(math.ceil((width - 2 - _printed_len(msg)) / 2.0)) * ' '
@@ -150,6 +152,7 @@ def cli_print(msg, color='', end=None, file=sys.stdout, logger=_LOG):
         for use with CLI output file objects like sys.stdout.
     logger: A logger to use, or None to disable logging.
   """
+  msg = msg.encode('utf-8')
   if logger:
     logger.debug('-> {}'.format(msg))
   if CLI_QUIET:
@@ -171,6 +174,7 @@ def error_print(msg, color=colorama.Fore.RED, file=sys.stderr):
     file: A file object to which the baracketed text will be written. Intended
         for use with CLI output file objects, specifically sys.stderr.
   """
+  msg = msg.encode('utf-8')
   if CLI_QUIET:
     return
   file.write('{sep}{bright}{color}Error: {normal}{msg}{sep}{reset}'.format(
