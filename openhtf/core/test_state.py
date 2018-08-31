@@ -516,7 +516,7 @@ class PhaseState(
     if mimetype is INFER_MIMETYPE:
       mimetype = mimetypes.guess_type(name)[0]
     elif mimetype is not None and not mimetypes.guess_extension(mimetype):
-      _LOG.warning('Unrecognized MIME type: "%s" for attachment "%s"',
+      _LOG.debug('Unrecognized MIME type: "%s" for attachment "%s"',
                    mimetype, name)
 
     self.phase_record.attachments[name] = test_record.Attachment(data, mimetype)
