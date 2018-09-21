@@ -235,7 +235,9 @@ class Test(object):
         test.abort_from_sig_int()
     if not cls.HANDLED_SIGINT_ONCE:
       cls.HANDLED_SIGINT_ONCE = True
-      raise KeyboardInterrupt
+      # Emilio 2018-09-21: Raising this KeyboardInterrupt caused a traceback to be shown on-screen after posting the
+      # test to the database. There's no point.
+      # raise KeyboardInterrupt
     # Otherwise, does not raise KeyboardInterrupt to ensure that the tests are
     # cleaned up.
 
