@@ -329,11 +329,6 @@ class TestState(util.SubscribableStateMixin):
                           % phase_execution_outcome.phase_result.exc_val)
         self._finalize(test_record.Outcome.FAIL)
       else:
-        self.logger.critical(
-            'Finishing test execution early due to an exception raised during '
-            'phase execution; outcome ERROR.')
-        # Enable CLI printing of the full traceback with the -v flag.
-        # WTF is that comment? Hell if I know (this is Emilio)
         show_traceback = False
         if 'show_traceback' in self.test_record.metadata['config'].keys():
             show_traceback = self.test_record.metadata['config']['show_traceback']
@@ -349,7 +344,8 @@ class TestState(util.SubscribableStateMixin):
         self.logger.critical("                       *** EXCEPTION ***")
         self.logger.critical("==================================================================")
         self.logger.critical(description.strip())
-        self.logger.info('Check test panel for traceback information.')
+        if not show_traceback:
+            self.logger.info('Check test panel for traceback information.')
         self._finalize(test_record.Outcome.ERROR)
     elif phase_execution_outcome.is_timeout:
       self.logger.error('Finishing test execution early due to phase '
