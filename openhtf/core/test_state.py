@@ -333,14 +333,18 @@ class TestState(util.SubscribableStateMixin):
             'Finishing test execution early due to an exception raised during '
             'phase execution; outcome ERROR.')
         # Enable CLI printing of the full traceback with the -v flag.
-        self.logger.critical(
-            'Traceback:%s%s%s%s',
+        self.logger.debug(
+            'Traceback:%s%s%s',
             os.linesep,
             ''.join(traceback.format_tb(
                 phase_execution_outcome.phase_result.exc_tb)),
             os.linesep,
-            description,
         )
+        self.logger.critical("==================================================================")
+        self.logger.critical("                       *** EXCEPTION ***")
+        self.logger.critical("==================================================================")
+        self.logger.critical(description.strip())
+        self.logger.info('Check test panel for traceback information.')
         self._finalize(test_record.Outcome.ERROR)
     elif phase_execution_outcome.is_timeout:
       self.logger.error('Finishing test execution early due to phase '
