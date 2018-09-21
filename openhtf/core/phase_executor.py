@@ -237,8 +237,9 @@ class PhaseExecutor(object):
     if t is None:
       # I don't think this should ever happen
       _LOG.info('No timeout on this phase.')
-    # elif float(t)/60.0 > 20:
-    #   _LOG.info('You have a long time to complete this phase.')
+    elif float(t)/60.0 > 20:
+      pass
+      # _LOG.info('You have a long time to complete this phase.')
     else:
       m = int(math.floor(float(t) / 60.0))
       s = int(t - m * 60)
