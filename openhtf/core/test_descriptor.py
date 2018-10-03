@@ -312,6 +312,7 @@ class Test(object):
       _LOG.info('Executing test: %s', self.descriptor.code_info.name)
       self.TEST_INSTANCES[self.uid] = self
       self._test_desc.metadata['openhtf_uid'] = self.uid
+      _LOG.debug('OpenHTF test instance uid "%s" recorded in metadata["openhtf_uid"]' % self.uid)
       self._executor.start()
 
     try:
