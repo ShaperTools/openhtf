@@ -344,6 +344,10 @@ class TestState(util.SubscribableStateMixin):
         self.logger.critical("                       *** EXCEPTION ***")
         self.logger.critical("==================================================================")
         self.logger.critical(description.strip())
+        # Record this is a failure so it shows up
+        self.test_record.metadata['failure_reason'] = "Exception: " + description.strip()
+        self.test_record.metadata['resolution_procedure'] = 'Contact Shaper Tools.'
+        self.test_record.metadata['retest_allowed'] = False
         if not show_traceback:
             self.logger.info('Check test panel for traceback information.')
         self._finalize(test_record.Outcome.ERROR)
