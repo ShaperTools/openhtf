@@ -113,6 +113,10 @@ class PhaseExecutionOutcome(collections.namedtuple(
     return self.phase_result is openhtf.PhaseResult.REPEAT
 
   @property
+  def is_continue(self):
+    return self.phase_result is openhtf.PhaseResult.CONTINUE
+
+  @property
   def is_skip(self):
     return self.phase_result is openhtf.PhaseResult.SKIP
 
@@ -286,6 +290,17 @@ class PhaseExecutor(object):
     result = override_result or phase_state.result
     _LOG.debug('Phase %s finished with result %s', phase_desc.name,
                result.phase_result)
+    if result.is_continue or result.is_repeat:
+      # phase passed, if we have a lingering test failure, clear it.
+      if 'failure_reason' in self.test_state.test_record.metadata.keys():
+        _LOG.debug('Phase result is "%s"; clearing failure reason' % result.phase_result)
+        del self.test_state.test_record.metadata['failure_reason']
+      if 'resolution_procedure' in self.test_state.test_record.metadata.keys():
+        _LOG.debug('Phase result is "%s"; clearing resolution procedure' % result.phase_result)
+        del self.test_state.test_record.metadata['resolution_procedure']
+      if 'retest_allowed' in self.test_state.test_record.metadata.keys():
+        _LOG.debug('Phase result is "%s"; clearing retest allowed' % result.phase_result)
+        del self.test_state.test_record.metadata['retest_allowed']
     return result
 
   def reset_stop(self):
