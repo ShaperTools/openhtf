@@ -318,7 +318,7 @@ class TestState(util.SubscribableStateMixin):
       result = phase_execution_outcome.phase_result
       if isinstance(result, phase_executor.ExceptionInfo):
         code = result.exc_type.__name__
-        description = unicode(result.exc_val)
+        description = unicode('Type: %s; message: %s.' % (result.exc_type, result.exc_val))
       else:
         # openhtf.util.threads.ThreadTerminationError gets str'd directly.
         code = str(type(phase_execution_outcome.phase_result).__name__)
@@ -331,11 +331,11 @@ class TestState(util.SubscribableStateMixin):
       else:
         show_traceback = False
         if 'show_traceback' in self.test_record.metadata['config'].keys():
-            show_traceback = self.test_record.metadata['config']['show_traceback']
-        traceback_message = 'Traceback:%s%s' % (
-            os.linesep,
-            ''.join(traceback.format_tb(
-                phase_execution_outcome.phase_result.exc_tb)))
+          show_traceback = self.test_record.metadata['config']['show_traceback']
+        if isinstance(result, phase_executor.ExceptionInfo):
+          traceback_message = 'Traceback:%s%s' % (os.linesep, ''.join(traceback.format_tb(result.exc_tb)))
+        else:
+          traceback_message = ''
         if show_traceback:
             self.logger.warning(traceback_message.strip())
         else:
@@ -345,7 +345,7 @@ class TestState(util.SubscribableStateMixin):
         self.logger.critical("==================================================================")
         self.logger.critical(description.strip())
         # Record this is a failure so it shows up
-        self.test_record.metadata['failure_reason'] = "Exception: " + description.strip()
+        self.test_record.metadata['failure_reason'] = "Unhandled exception. " + description.strip()
         self.test_record.metadata['resolution_procedure'] = 'Contact Shaper Tools.'
         self.test_record.metadata['retest_allowed'] = False
         if not show_traceback:
