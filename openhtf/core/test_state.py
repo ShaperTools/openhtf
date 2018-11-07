@@ -46,6 +46,7 @@ from openhtf.core import test_record
 from openhtf.util import conf
 from openhtf.util import logs
 from past.builtins import long
+import paramiko.ssh_exception
 
 conf.declare('allow_unset_measurements', default_value=False,
              description='If True, unset measurements do not cause Tests to '
@@ -316,7 +317,17 @@ class TestState(util.SubscribableStateMixin):
     # Handle a few cases where the test is ending prematurely.
     if phase_execution_outcome.raised_exception:
       result = phase_execution_outcome.phase_result
+      resolution_procedure = 'Contact Shaper Tools.'
+      retest_allowed = False
       if isinstance(result, phase_executor.ExceptionInfo):
+        if isinstance(result.exc_val, paramiko.ssh_exception.SSHException):
+            self.logger.debug("OpenHTF is tagging a Paramiko exception")
+            resolution_procedure = 'Retest this unit.'
+            retest_allowed = True
+        if isinstance(result.exc_val, socket.error):
+            self.logger.debug("OpenHTF is tagging a socket exception")
+            resolution_procedure = 'Retest this unit.'
+            retest_allowed = True
         code = result.exc_type.__name__
         description = unicode('Type: %s; message: %s.' % (result.exc_type, result.exc_val))
       else:
@@ -346,8 +357,8 @@ class TestState(util.SubscribableStateMixin):
         self.logger.critical(description.strip())
         # Record this is a failure so it shows up
         self.test_record.metadata['failure_reason'] = "Unhandled exception. " + description.strip()
-        self.test_record.metadata['resolution_procedure'] = 'Contact Shaper Tools.'
-        self.test_record.metadata['retest_allowed'] = False
+        self.test_record.metadata['resolution_procedure'] = resolution_procedure
+        self.test_record.metadata['retest_allowed'] = retest_allowed
         if not show_traceback:
             self.logger.info('Check test panel for traceback information.')
         self._finalize(test_record.Outcome.ERROR)
