@@ -330,6 +330,7 @@ class TestState(util.SubscribableStateMixin):
             retest_allowed = True
         code = result.exc_type.__name__
         description = unicode('Type: %s; message: %s.' % (result.exc_type, result.exc_val))
+        description = description.replace('..', '.')
       else:
         # openhtf.util.threads.ThreadTerminationError gets str'd directly.
         code = str(type(phase_execution_outcome.phase_result).__name__)
