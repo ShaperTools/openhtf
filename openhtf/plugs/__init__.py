@@ -419,6 +419,7 @@ class PlugManager(object):
     Returns:
       The plug manager's instance of the specified plug.
     """
+    #_LOG.debug(self._plugs_by_name)
     return self._plugs_by_name.get(plug_name)
 
   def update_plug(self, plug_type, plug_value):
