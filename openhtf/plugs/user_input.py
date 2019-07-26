@@ -168,8 +168,8 @@ class UserInput(plugs.FrontendAwareBasePlug):
   def _create_prompt(self, message, text_input):
     """Sets the prompt."""
     prompt_id = uuid.uuid4()
-    _LOG.debug(u'Displaying prompt (%s): "%s"%s', prompt_id, message,
-               ', Expects text' if text_input else '')
+    # _LOG.debug(u'Displaying prompt (%s): "%s"%s', prompt_id, message,
+    #            ', Expects text' if text_input else '')
 
     self._response = None
     self._prompt = Prompt(id=prompt_id, message=message, text_input=text_input)
@@ -224,8 +224,8 @@ class UserInput(plugs.FrontendAwareBasePlug):
       if self._prompt:
         raise MultiplePromptsError
       prompt_id = uuid.uuid4().hex
-      _LOG.debug('Displaying prompt (%s): "%s"%s', prompt_id, message,
-                 ', Expects text input.' if text_input else '')
+      # _LOG.debug('Displaying prompt (%s): "%s"%s', prompt_id, message,
+      #            ', Expects text input.' if text_input else '')
 
       self._response = None
       self._prompt = Prompt(
@@ -272,7 +272,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
     Returns:
       True if the prompt with the given ID was active, otherwise False.
     """
-    _LOG.debug(u'Responding to prompt (%s): "%s"', prompt_id, response)
+    # _LOG.debug(u'Responding to prompt (%s): "%s"', prompt_id, response)
     with self._cond:
       if not (self._prompt and self._prompt.id == prompt_id):
         return False
