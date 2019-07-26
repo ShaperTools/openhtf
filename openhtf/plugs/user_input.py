@@ -164,6 +164,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
     self._elapsed_seconds = 0
     self._attendance_log = []
     self._total_elapsed_seconds = 0
+    self._track_operator_time = True
     # _LOG.debug("UserInput.__init__")
 
   def get_attendance_log(self):
@@ -173,6 +174,8 @@ class UserInput(plugs.FrontendAwareBasePlug):
     return self._total_elapsed_seconds
 
   def mark_operator_attendance_start(self):
+    if not self._track_operator_time:
+      return
     if  self._start_time_millis is not None:
       raise OperatorAttendanceViolation("Attempt to mark operator attendance start without marking an end to the previous one.")
 
@@ -181,6 +184,8 @@ class UserInput(plugs.FrontendAwareBasePlug):
     self._start_time_millis = util.time_millis()
 
   def mark_operator_attendance_end(self):
+    if not self._track_operator_time:
+      return
     if self._start_time_millis is None:
       raise OperatorAttendanceViolation("Attempt ot mark operator attendance end without marking the start.")
 
@@ -230,7 +235,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
     self.notify_update()
     # _LOG.debug("UserInput._remove_prompt")
 
-  def prompt(self, message, text_input=False, timeout_s=None, cli_color=''):
+  def prompt(self, message, text_input=False, timeout_s=None, cli_color='', track_operator_time=True):
     """Display a prompt and wait for a response.
 
     Args:
@@ -238,6 +243,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
       text_input: A boolean indicating whether the user must respond with text.
       timeout_s: Seconds to wait before raising a PromptUnansweredError.
       cli_color: An ANSI color code, or the empty string.
+      track_operator_time: If True, will time how long the prompt takes to answer.
 
     Returns:
       A string response, or the empty string if text_input was False.
@@ -246,10 +252,11 @@ class UserInput(plugs.FrontendAwareBasePlug):
       MultiplePromptsError: There was already an existing prompt.
       PromptUnansweredError: Timed out waiting for the user to respond.
     """
-    self.start_prompt(message, text_input, cli_color)
+    self._track_operator_time = track_operator_time
+    self.start_prompt(message, text_input, cli_color, track_operator_time)
     return self.wait_for_prompt(timeout_s)
 
-  def start_prompt(self, message, text_input=False, cli_color=''):
+  def start_prompt(self, message, text_input=False, cli_color='', track_operator_time=True):
     """Display a prompt.
 
     Args:
@@ -263,6 +270,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
     Returns:
       A string uniquely identifying the prompt.
     """
+    self._track_operator_time = track_operator_time
     with self._cond:
       if self._prompt:
         raise MultiplePromptsError
