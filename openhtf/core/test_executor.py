@@ -220,7 +220,7 @@ class TestExecutor(threads.KillableThread):
         'attendance_log': promptPlug.get_attendance_log(),
         'total_attendance_seconds': promptPlug.get_total_elapsed_seconds()
       }
-      self.test_state.logger.info('Operator was involved for %.1f seconds.' %
+      self.test_state.logger.debug('Operator was involved for %.1f seconds.' %
                                   self.test_state.test_record.metadata['operator_attendance']['total_attendance_seconds'])
 
     # Plug teardown does not affect the test outcome.

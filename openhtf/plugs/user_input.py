@@ -197,7 +197,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
       'elapsed_seconds': self._elapsed_seconds
     })
 
-    _LOG.warning("Operator was required for %.1f seconds; %.1f minutes this test so far." %
+    _LOG.debug("Operator was required for %.1f seconds; %.1f minutes this test so far." %
                  (self._elapsed_seconds, self._total_elapsed_seconds / 60.0))
 
     self._start_time_millis = None # we use this to tag that we've completed an operator attendance cycle.
