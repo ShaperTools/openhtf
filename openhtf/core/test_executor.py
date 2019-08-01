@@ -204,6 +204,25 @@ class TestExecutor(threads.KillableThread):
 
   # TODO(kschiller): Cleanup the naming here and possibly merge with finalize.
   def _execute_test_teardown(self):
+    # Special handling for the fact that we've made the UserInput plug track usage time.
+    # We want to add this to the test record.
+    promptPlug = self.test_state.plug_manager.get_plug_by_class_path('openhtf.plugs.user_input.UserInput')
+    if not promptPlug:
+      self.test_state.logger.debug('This test did not use an OpenHTF UserInput plug.')
+      promptPlug = self.test_state.plug_manager.get_plug_by_class_path('shaper.plugs.user_input.UserInput')
+      if not promptPlug:
+        self.test_state.logger.debug('This test did not use an Shaper UserInput plug.')
+
+    if not promptPlug:
+      self.test_state.logger.warning('No UserInput plug was used in this test!')
+    else:
+      self.test_state.test_record.metadata['operator_attendance'] = {
+        'attendance_log': promptPlug.get_attendance_log(),
+        'total_attendance_seconds': promptPlug.get_total_elapsed_seconds()
+      }
+      self.test_state.logger.debug('Operator was involved for %.1f seconds.' %
+                                  self.test_state.test_record.metadata['operator_attendance']['total_attendance_seconds'])
+
     # Plug teardown does not affect the test outcome.
     self.test_state.plug_manager.tear_down_plugs()
 
