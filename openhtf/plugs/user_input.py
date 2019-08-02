@@ -35,6 +35,7 @@ import uuid
 
 from openhtf import PhaseOptions
 from openhtf import plugs
+from openhtf import util
 from openhtf.util import console_output
 from six.moves import input
 
@@ -56,6 +57,9 @@ class MultiplePromptsError(Exception):
 
 class PromptUnansweredError(Exception):
   """Raised when a prompt times out or otherwise comes back unanswered."""
+
+class OperatorAttendanceViolation(Exception):
+  """Raised when misuse of operator attendance marking is detected."""
 
 
 Prompt = collections.namedtuple('Prompt', 'id message text_input')
@@ -155,6 +159,48 @@ class UserInput(plugs.FrontendAwareBasePlug):
     self._console_prompt = None
     self._response = None
     self._cond = threading.Condition()
+    self._start_time_millis = None
+    self._response_time_millis = None
+    self._elapsed_seconds = 0
+    self._attendance_log = []
+    self._total_elapsed_seconds = 0
+    self._track_operator_time = True
+    # _LOG.debug("UserInput.__init__")
+
+  def get_attendance_log(self):
+    return self._attendance_log
+
+  def get_total_elapsed_seconds(self):
+    return self._total_elapsed_seconds
+
+  def mark_operator_attendance_start(self):
+    if not self._track_operator_time:
+      return
+    if  self._start_time_millis is not None:
+      raise OperatorAttendanceViolation("Attempt to mark operator attendance start without marking an end to the previous one.")
+
+    self._elapsed_seconds = 0
+    self._response_time_millis = None
+    self._start_time_millis = util.time_millis()
+
+  def mark_operator_attendance_end(self):
+    if not self._track_operator_time:
+      return
+    if self._start_time_millis is None:
+      raise OperatorAttendanceViolation("Attempt ot mark operator attendance end without marking the start.")
+
+    self._response_time_millis = util.time_millis()
+    self._elapsed_seconds = (self._response_time_millis - self._start_time_millis) / float(1000)
+    self._total_elapsed_seconds += self._elapsed_seconds
+    self._attendance_log.append({
+      'start_time_millis': self._start_time_millis,
+      'elapsed_seconds': self._elapsed_seconds
+    })
+
+    _LOG.debug("Operator was required for %.1f seconds; %.1f minutes this test so far." %
+                 (self._elapsed_seconds, self._total_elapsed_seconds / 60.0))
+
+    self._start_time_millis = None # we use this to tag that we've completed an operator attendance cycle.
 
   def _asdict(self):
     """Return a dictionary representation of the current prompt."""
@@ -178,6 +224,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
 
     self._console_prompt.start()
     self.notify_update()
+    # _LOG.debug("UserInput._create_prompt")
     return prompt_id
 
   def remove_prompt(self):
@@ -186,8 +233,9 @@ class UserInput(plugs.FrontendAwareBasePlug):
     self._console_prompt.Stop()
     self._console_prompt = None
     self.notify_update()
+    # _LOG.debug("UserInput._remove_prompt")
 
-  def prompt(self, message, text_input=False, timeout_s=None, cli_color=''):
+  def prompt(self, message, text_input=False, timeout_s=None, cli_color='', track_operator_time=True):
     """Display a prompt and wait for a response.
 
     Args:
@@ -195,6 +243,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
       text_input: A boolean indicating whether the user must respond with text.
       timeout_s: Seconds to wait before raising a PromptUnansweredError.
       cli_color: An ANSI color code, or the empty string.
+      track_operator_time: If True, will time how long the prompt takes to answer.
 
     Returns:
       A string response, or the empty string if text_input was False.
@@ -203,10 +252,11 @@ class UserInput(plugs.FrontendAwareBasePlug):
       MultiplePromptsError: There was already an existing prompt.
       PromptUnansweredError: Timed out waiting for the user to respond.
     """
-    self.start_prompt(message, text_input, cli_color)
+    self._track_operator_time = track_operator_time
+    self.start_prompt(message, text_input, cli_color, track_operator_time)
     return self.wait_for_prompt(timeout_s)
 
-  def start_prompt(self, message, text_input=False, cli_color=''):
+  def start_prompt(self, message, text_input=False, cli_color='', track_operator_time=True):
     """Display a prompt.
 
     Args:
@@ -220,6 +270,7 @@ class UserInput(plugs.FrontendAwareBasePlug):
     Returns:
       A string uniquely identifying the prompt.
     """
+    self._track_operator_time = track_operator_time
     with self._cond:
       if self._prompt:
         raise MultiplePromptsError
@@ -233,8 +284,10 @@ class UserInput(plugs.FrontendAwareBasePlug):
       self._console_prompt = ConsolePrompt(
           message, functools.partial(self.respond, prompt_id), cli_color)
 
+      self.mark_operator_attendance_start()
       self._console_prompt.start()
       self.notify_update()
+      # _LOG.debug("UserInput.start_prompt")
       return prompt_id
 
   def wait_for_prompt(self, timeout_s=None):
@@ -250,12 +303,14 @@ class UserInput(plugs.FrontendAwareBasePlug):
       PromptUnansweredError: Timed out waiting for the user to respond.
     """
     with self._cond:
+      # _LOG.debug("UserInput.wait_for_prompt")
       if self._prompt:
         if timeout_s is None:
           self._cond.wait(3600 * 24 * 365)
         else:
           self._cond.wait(timeout_s)
       if self._response is None:
+        self.mark_operator_attendance_end()
         raise PromptUnansweredError
       return self._response
 
@@ -280,6 +335,8 @@ class UserInput(plugs.FrontendAwareBasePlug):
       self.last_response = (prompt_id, response)
       self.remove_prompt()
       self._cond.notifyAll()
+      # _LOG.debug("UserInput.respond")
+      self.mark_operator_attendance_end()
     return True
 
 
