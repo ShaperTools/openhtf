@@ -187,11 +187,11 @@ setup(
     maintainer_email='jethier@google.com',
     packages=find_packages(exclude='examples'),
     package_data={'openhtf': ['output/proto/*.proto',
-                              'output/web_gui/dist/*',
+                              'output/web_gui/dist/*.*',
                               'output/web_gui/dist/css/*',
                               'output/web_gui/dist/js/*',
                               'output/web_gui/dist/img/*',
-                              'output/web_gui/*']},
+                              'output/web_gui/*.*']},
     cmdclass={
         'build_proto': BuildProtoCommand,
         'clean': CleanCommand,
